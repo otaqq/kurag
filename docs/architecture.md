@@ -159,7 +159,8 @@ crates/kurag/         server + CLI
 crates/kurag-sync/    client: sources -> chunks -> server; knowledge graph extraction
 ui/                   kurag-ui: the browser app (own build); its output is embedded in the server
                       (feature "ui", served at /ui) or hosted on its own against the API
-tests/contract/       black-box HTTP tests (run against any server with this API)
+tests/contract/       black-box HTTP tests (run against any server with this API) and fake-embed, the
+                      stand-in embedding API they need (design.md, "Contract tests")
 docs/                 design.md, architecture.md, api.md, ...
 docker/  charts/kurag/  dist/systemd/
 ```
@@ -169,4 +170,3 @@ docker/  charts/kurag/  dist/systemd/
 - ANN index and its file layout (*to measure*, design.md "Choosing the ANN index").
 - Whether similarity edges are computed on upsert (as in txtai-kura) or by a background job when namespaces are
   large.
-- Contract test runner: Rust (reqwest) in the workspace, or a language-independent format.

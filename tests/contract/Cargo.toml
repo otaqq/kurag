@@ -1,0 +1,17 @@
+[package]
+name = "kurag-contract"
+version = "0.0.0"
+description = "Black-box HTTP tests for the kurag API, and a stand-in embedding server for them"
+publish = false
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+axum = "0.8"
+base64 = "0.22"
+md-5 = "0.10"
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }

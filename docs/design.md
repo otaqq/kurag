@@ -138,6 +138,16 @@ Black-box HTTP tests that run against any server with this API: txtai-kura today
 
 They come first: they pin down what "the same API" means before any Rust is written.
 
+How they run (`tests/contract/`, crate `kurag-contract`):
+
+- `fake-embed` (a binary in the crate) stands in for the embedding API: an OpenAI-compatible `/v1/embeddings`
+  answering hashed character trigrams (256 dimensions, unit length, texts sharing words come out close). The server
+  under test is configured to use it, so every implementation gets the same vectors and no model is needed.
+- The tests read `KURAG_URL` and `KURAG_API_KEY`, and skip with a note when `KURAG_URL` is not set.
+- Each test writes under its own root namespace (`ct<run>-<test>`) and searches only there, and leaves its data
+  behind: point them at a disposable server.
+- `cargo test -p kurag-contract`. All 11 pass against txtai-kura v0.3.5.
+
 ## Backend trait
 
 One namespace is one unit everywhere (one folder, database, or tenant). A backend provides:
