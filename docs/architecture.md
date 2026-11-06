@@ -34,26 +34,29 @@ the first hit is the same, and latency.
 
 Measured 2026-11-06 on a copy of a real deployment: 48 namespaces, 263,260 chunks, 768 dimensions, 1.5 GB on
 disk; 77 questions from an evaluation set (4 namespaces). txtai-kura v0.3.5 (faiss, 8-bit SQ) and kurag (release
-build, exact search over 8-bit vectors) on different machines, same embedding API:
+build, rusqlite 0.37, exact search over 8-bit vectors) on the same machine (4 vCPU), same embedding API:
 
 | | txtai-kura | kurag |
 |---|---|---|
 | Import | | 1 min 8 s, 315 MB peak |
-| Resident, every namespace open | 621 MiB | 330 MB (vectors 202 MB) |
+| Resident, every namespace open | 621 MiB | 320-330 MB (vectors 202 MB) |
 | vector, one namespace: overlap@5 / top-1 same | | 97.1 % / 94.8 % |
 | text, one namespace | | 99.0 % / 98.7 % |
 | hybrid, one namespace | | 97.4 % / 96.1 % |
-| vector over a tree (`it`, `academic`), ms p50 / p95 | 230 / 328 | 113 / 141 |
-| text over a tree, ms p50 / p95 | 173 / 272 | 333 / 564 |
-| hybrid over a tree, ms p50 / p95 | 484 / 627 | 410 / 622 |
+| vector, one namespace, ms p50 / p95 | 51 / 66 | 36 / 47 |
+| text, one namespace | 11 / 27 | 6 / 18 |
+| hybrid, one namespace | 67 / 88 | 43 / 67 |
+| vector over a tree (`it`, `academic`) | 222 / 312 | 105 / 140 |
+| text over a tree | 168 / 251 | 113 / 193 |
+| hybrid over a tree | 473 / 589 | 236 / 355 |
 
-Latency includes embedding the query (vector, hybrid) and the network; the machines differ (kurag ran on a
-2-vCPU VM), so only large gaps mean something. Two findings to follow up:
+Latency includes embedding the query (vector, hybrid). On a smaller development VM (2 vCPU, container memory
+limit) text search over a tree took about twice as long as txtai-kura on the machine above; the same queries
+against both databases on one machine took the same time, so that gap was the environment, not the index.
 
-- Vector results differ in 4-6 of 77 first hits: both quantize to 8 bits, differently (faiss trains the range per
-  dimension, kurag uses a fixed x 127). Which is closer to exact float search is not measured yet; that is part of
-  choosing the ANN index.
-- Text search over many namespaces is about twice as slow as txtai-kura's. Not profiled yet.
+To follow up: vector results differ in 4-6 of 77 first hits. Both quantize to 8 bits, differently (faiss trains
+the range per dimension, kurag uses a fixed x 127). Which is closer to exact float search is not measured yet; that
+is part of choosing the ANN index.
 
 ## Components
 
