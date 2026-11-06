@@ -12,9 +12,10 @@ route (no UI yet). It passes the contract tests, as txtai-kura does. Differences
   `EMBED_API_KEY`, `EMBED_BATCH`, `EDGE_NEIGHBOURS`, `EDGE_MIN`); the TOML file comes later.
 - **No Backend trait yet.** The SQLite backend is called directly; the trait is cut out of it when a second
   backend is written, so that it follows real code rather than a guess.
-- **Vectors: exact search over 8-bit vectors in memory** (`vectors.rs`: each component of a unit vector stored as
-  round(x * 127), loaded from the float16 copies in `kurag.db` when a namespace opens). No ANN index until
-  measurements call for one. `/rebuild` reloads them from the stored copies.
+- **Vectors: exact search over 8-bit vectors in memory** (`vectors.rs`: a range per dimension learned from the
+  vectors, each component stored as one of 256 steps in it, as in faiss's SQ8; loaded from the float16 copies in
+  `kurag.db` when a namespace opens, learned again on `/rebuild` and when the number of vectors has doubled). No
+  ANN index until measurements call for one.
 - **One embedding URL**; no failover list or external picker yet.
 - Chunks sent again with the same text reuse their stored vectors (no embedding call); they still get a new row id,
   so the knowledge graph treats them as to do again, as txtai-kura does.
@@ -54,16 +55,19 @@ Latency includes embedding the query (vector, hybrid). On a smaller development 
 limit) text search over a tree took about twice as long as txtai-kura on the machine above; the same queries
 against both databases on one machine took the same time, so that gap was the environment, not the index.
 
-Vector results differ in 4-6 of 77 first hits. `kurag recall` (exact search over the float16 copies as the truth,
+With the first version, vector results differed in 4-6 of 77 first hits. `kurag recall` (exact search over the float16 copies as the truth,
 each question embedded once) shows the difference is kurag's:
 
 | | recall@5, one namespace | top-1 exact | recall@5, over a tree | top-1 exact |
 |---|---|---|---|---|
 | txtai-kura (faiss SQ8: range trained per dimension) | 99.2 % | 100 % | 99.2 % | 98.7 % |
-| kurag v0.1.0 (fixed x 127) | 97.1 % | 94.8 % | 96.9 % | 92.2 % |
+| kurag, first version (fixed x 127 for every dimension) | 97.1 % | 94.8 % | 96.9 % | 92.2 % |
+| kurag, range per dimension | 99.0 % | 100 % | 99.2 % | 100 % |
 
 The components of a 768-dimension unit vector are small (typical size 1 / sqrt(768) = 0.036), so a fixed x 127
-leaves most of the 255 levels unused. Scaling each dimension to its own range, as faiss does, is the fix to try next.
+left most of the 255 steps unused. With a range per dimension kurag matches txtai-kura (overlap@5 with it 99.2 %
+in one namespace, 99.5 % over a tree) at the same speed (vector over a tree 111 ms p50 on the development VM, 113
+before) and the same memory.
 
 ## Components
 

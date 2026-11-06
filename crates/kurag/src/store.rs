@@ -10,7 +10,7 @@ use half::f16;
 use kurag_core::{ids, score, text, types::Doc};
 use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
 
-use crate::{fts, kg, vectors::Vectors};
+use crate::{fts, kg, vectors::{Range, Vectors}};
 
 pub const DB: &str = "kurag.db";
 
@@ -86,19 +86,32 @@ impl Namespace {
 }
 
 impl Inner {
-    /// Loads the 8-bit vectors from the stored float16 copies.
+    /// Loads the 8-bit vectors from the stored float16 copies, learning the ranges from them first (two passes,
+    /// so the float copies are never all in memory at once).
     fn load_vectors(&mut self) -> Result<usize> {
-        let mut st = self.db.prepare("select vid, v from vectors order by vid")?;
-        let mut rows = st.query([])?;
-        let mut vecs: Option<Vectors> = None;
-        while let Some(r) = rows.next()? {
-            let v = from_f16_bytes(&r.get::<_, Vec<u8>>(1)?);
-            vecs.get_or_insert_with(|| Vectors::new(v.len())).add(r.get(0)?, &v);
+        let mut range: Option<Range> = None;
+        {
+            let mut st = self.db.prepare("select v from vectors")?;
+            let mut rows = st.query([])?;
+            while let Some(r) = rows.next()? {
+                let v = from_f16_bytes(&r.get::<_, Vec<u8>>(0)?);
+                range.get_or_insert_with(|| Range::new(v.len())).add(&v);
+            }
         }
-        let n = vecs.as_ref().map_or(0, Vectors::len);
-        drop(rows);
-        drop(st);
-        self.vecs = vecs;
+        let Some(range) = range else {
+            self.vecs = None;
+            return Ok(0);
+        };
+        let mut vecs = Vectors::new(&range);
+        {
+            let mut st = self.db.prepare("select vid, v from vectors order by vid")?;
+            let mut rows = st.query([])?;
+            while let Some(r) = rows.next()? {
+                vecs.add(r.get(0)?, &from_f16_bytes(&r.get::<_, Vec<u8>>(1)?));
+            }
+        }
+        let n = vecs.len();
+        self.vecs = Some(vecs);
         Ok(n)
     }
 
@@ -193,8 +206,16 @@ impl Inner {
             )));
         }
         let result = self.upsert_tx(docs, vectors, neighbours, edge_min);
-        if result.is_err() {
-            self.load_vectors()?; // the transaction was rolled back: memory follows the database
+        match &result {
+            // the transaction was rolled back: memory follows the database
+            Err(_) => {
+                self.load_vectors()?;
+            }
+            // ranges learned on a few vectors: learn them again on all of them once their number has doubled
+            Ok(_) if self.vecs.as_ref().is_some_and(|v| v.len() >= 2 * v.trained_on().max(1)) => {
+                self.load_vectors()?;
+            }
+            Ok(_) => {}
         }
         result
     }
@@ -203,7 +224,12 @@ impl Inner {
         let tx = self.db.unchecked_transaction()?;
         let old = self.vids_of_ids(&docs.iter().map(|d| d.id.as_str()).collect::<Vec<_>>())?;
         self.remove_rows(&old)?;
-        let vecs = self.vecs.get_or_insert_with(|| Vectors::new(vectors[0].len()));
+        let vecs = self.vecs.get_or_insert_with(|| {
+            // a new namespace: ranges from this first batch
+            let mut range = Range::new(vectors[0].len());
+            vectors.iter().for_each(|v| range.add(v));
+            Vectors::new(&range)
+        });
         old.iter().for_each(|&vid| vecs.remove(vid));
         let mut vids = Vec::with_capacity(docs.len());
         {
