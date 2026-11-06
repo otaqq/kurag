@@ -1,4 +1,4 @@
-//! The HTTP API (version 1, see docs/design.md "API"). Every route but `/health` needs the `X-API-Key` header.
+//! The HTTP API (version 1, see docs/design.md "API"). Every route but `/health` and the graph view (`/ui`, own login) needs the `X-API-Key` header.
 //! Database work runs on the blocking thread pool; embedding calls run before a namespace is locked.
 
 use std::sync::Arc;
@@ -15,7 +15,7 @@ use serde_json::{Map, Value, json};
 use crate::config::Config;
 use crate::embed::Embedder;
 use crate::store::{self, Namespace, Store};
-use crate::{kg, search};
+use crate::{kg, search, sections};
 
 pub struct App {
     pub cfg: Config,
@@ -64,13 +64,13 @@ fn checked<T: Check>(req: T) -> Result<T, ApiError> {
 }
 
 /// Runs database work off the async threads.
-async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, ApiError> + Send + 'static) -> Result<T, ApiError> {
+pub(crate) async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, ApiError> + Send + 'static) -> Result<T, ApiError> {
     tokio::task::spawn_blocking(f)
         .await
         .map_err(|e| ApiError::Status(StatusCode::INTERNAL_SERVER_ERROR, format!("task: {e}")))?
 }
 
-fn same(a: &[u8], b: &[u8]) -> bool {
+pub(crate) fn same(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
@@ -94,24 +94,32 @@ pub fn router(app: Arc<App>) -> Router {
         .route("/kg/search", post(kg_search))
         .route("/rebuild", post(rebuild))
         .route_layer(middleware::from_fn_with_state(app.clone(), auth));
-    Router::new().route("/health", get(health)).merge(api).with_state(app)
+    #[allow(unused_mut)]
+    let mut routes = Router::new().route("/health", get(health)).merge(api);
+    #[cfg(feature = "ui")]
+    if let Some(ui) = crate::ui::router(app.clone()) {
+        routes = routes.merge(ui);
+    }
+    routes.with_state(app)
 }
 
 async fn health(State(app): S) -> Json<Value> {
     Json(json!({"ok": true, "namespaces": app.store.names()}))
 }
 
-async fn namespaces(State(app): S) -> Answer<Map<String, Value>> {
-    blocking(move || {
-        let mut out = Map::new();
-        for name in app.store.names() {
-            if let Some(ns) = app.store.get(&name, false)? {
-                out.insert(name, json!(ns.lock().count()?));
-            }
+/// {namespace: chunks}
+pub(crate) fn namespace_counts(app: &App) -> Result<Map<String, Value>, ApiError> {
+    let mut out = Map::new();
+    for name in app.store.names() {
+        if let Some(ns) = app.store.get(&name, false)? {
+            out.insert(name, json!(ns.lock().count()?));
         }
-        Ok(Json(out))
-    })
-    .await
+    }
+    Ok(out)
+}
+
+async fn namespaces(State(app): S) -> Answer<Map<String, Value>> {
+    blocking(move || namespace_counts(&app).map(Json)).await
 }
 
 async fn upsert(State(app): S, Json(req): Json<Upsert>) -> Answer<Value> {
@@ -215,6 +223,12 @@ async fn kg_upsert(State(app): S, Json(req): Json<KgUpsert>) -> Answer<Value> {
         let ns = app.store.get(&req.namespace, true)?.expect("created");
         let inner = ns.lock();
         let tx = inner.db.unchecked_transaction()?;
+        // the sections' labels may show these entities
+        let chunks: Vec<&str> = req.done.iter().map(String::as_str)
+            .chain(req.mentions.iter().map(|m| m.chunk.as_str()))
+            .chain(req.relations.iter().map(|r| r.chunk.as_str()).filter(|c| !c.is_empty()))
+            .collect();
+        sections::forget_chunks(&tx, &chunks)?;
         let c = kg::upsert(&tx, &req)?;
         tx.commit()?;
         Ok(Json(json!({"namespace": req.namespace, "entities": c.entities, "relations": c.relations,
@@ -242,7 +256,9 @@ async fn kg_delete(State(app): S, Json(req): Json<Delete>) -> Answer<Value> {
         };
         let inner = ns.lock();
         let tx = inner.db.unchecked_transaction()?;
-        let (relations, mentions, entities) = kg::delete(&tx, &prefixes.iter().map(|p| ids::prefix_range(p)).collect::<Vec<_>>())?;
+        let ranges: Vec<_> = prefixes.iter().map(|p| ids::prefix_range(p)).collect();
+        sections::forget_ranges(&tx, &ranges)?;
+        let (relations, mentions, entities) = kg::delete(&tx, &ranges)?;
         tx.commit()?;
         Ok(Json(json!({"namespace": req.namespace, "relations": relations, "mentions": mentions, "entities": entities})))
     })

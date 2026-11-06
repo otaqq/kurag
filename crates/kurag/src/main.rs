@@ -8,7 +8,12 @@ mod import;
 mod kg;
 mod recall;
 mod search;
+// without the graph view only the label forgetting is used
+#[cfg_attr(not(feature = "ui"), allow(dead_code))]
+mod sections;
 mod store;
+#[cfg(feature = "ui")]
+mod ui;
 mod vectors;
 
 use std::sync::Arc;

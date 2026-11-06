@@ -10,7 +10,7 @@ use half::f16;
 use kurag_core::{ids, score, text, types::Doc};
 use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
 
-use crate::{fts, kg, vectors::{Range, Vectors}};
+use crate::{fts, kg, sections, vectors::{Range, Vectors}};
 
 pub const DB: &str = "kurag.db";
 
@@ -74,7 +74,7 @@ impl Namespace {
         let db = Connection::open(path.join(DB))?;
         db.query_row("pragma journal_mode=wal", [], |_| Ok(()))?;
         db.execute_batch("pragma synchronous=normal")?;
-        db.execute_batch(&format!("{SCHEMA}{}{}", fts::SCHEMA, kg::SCHEMA))?;
+        db.execute_batch(&format!("{SCHEMA}{}{}{}", fts::SCHEMA, kg::SCHEMA, sections::SCHEMA))?;
         let mut inner = Inner { db, vecs: None };
         inner.load_vectors()?;
         Ok(Namespace { name: name.to_string(), inner: Mutex::new(inner) })
@@ -115,8 +115,10 @@ impl Inner {
         Ok(n)
     }
 
-    /// Builds the vectors in memory again from the stored copies; the number of vectors.
+    /// Builds the vectors in memory again from the stored copies, and forgets the section labels; the number of
+    /// vectors.
     pub fn rebuild(&mut self) -> Result<usize> {
+        sections::forget_all(&self.db)?;
         self.load_vectors()
     }
 
@@ -174,10 +176,12 @@ impl Inner {
         Ok(out)
     }
 
-    /// Removes chunks from the database (in the caller's transaction): rows, vectors, full text, edges.
+    /// Removes chunks from the database (in the caller's transaction): rows, vectors, full text, edges, and the
+    /// labels of their sections.
     fn remove_rows(&self, vids: &[i64]) -> Result<()> {
         for r in in_parts(vids.len()) {
             let part = &vids[r];
+            sections::forget_vids(&self.db, part)?;
             let m = kg::marks(part.len());
             for sql in [
                 format!("delete from edges where a in ({m})"),
@@ -243,6 +247,7 @@ impl Inner {
                 vids.push(vid);
             }
         }
+        sections::forget_vids(&tx, &vids)?;
         let rows: Vec<(i64, &str)> = vids.iter().copied().zip(docs.iter().map(|d| d.text.as_str())).collect();
         fts::add(&tx, "fts", &rows)?;
         // link the new chunks to their nearest chunks, both directions

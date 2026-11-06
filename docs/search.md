@@ -147,6 +147,40 @@ questions about them; it does not extract.
   on name and description (same terms as above), then the relations around them up to `depth` steps, with the
   chunks that mention each entity.
 
+## Graph view and section labels
+
+The graph view (`/ui`) draws **sections** (the chunks of one heading or page, `<source>:<path>#<section>`)
+rather than chunks: two sections are linked by the closest pair of their chunks. A whole namespace can hold tens of
+thousands of sections, too many to lay out in a browser, so the view draws one section and those linked to it
+(`/ui/around`: up to `depth` steps, 60 more sections, the strongest links first). To start without a search it
+lists the **hubs**, the sections linked to the most other sections.
+
+A section's name is a heading or, for books, a page number (`p.103`), which says nothing about what is on it, so
+each node is labelled with up to three **keywords**:
+
+1. **Entities** of the knowledge graph mentioned in the section's chunks, when the namespace has been extracted.
+   They are ranked by `tf x ln(N / df) x ln(1 + df)`, with tf the section's chunks that mention the entity, df
+   all chunks that mention it and N all chunks of the namespace. TF-IDF alone puts the rarest extractions first
+   (file names, version numbers); frequency alone puts the topic of the whole namespace on every page (Kubernetes
+   in a Kubernetes book); the extra `ln(1 + df)` favours the middle. Only entities mentioned in two chunks or
+   more, with a letter in the name and at most 24 characters, count.
+2. **Terms** fill the rest: the section's runs (a word, a katakana or kanji compound, as in "Terms"), the 20 most
+   frequent looked up in the full-text index and ranked by `(1 + ln tf) x ln(N / df)`. A term in fewer than two
+   chunks is left out (mostly text-extraction noise), and so is a term in more than 30 % of the chunks of its own
+   file (running heads: the title or author printed on every page). That check counts matches in the run of row
+   ids of the file, which the full-text index does fast, since a file's chunks are written together.
+
+Keywords holding one another (再起動 and 再起動方法) count once. The label is made the first time a section is
+shown and kept in `section_labels`; upserting or deleting the section's chunks, a knowledge-graph upsert or delete
+that touches them, or `/rebuild` forgets it.
+
+Measured on a copy of a real data set (47 namespaces, mostly books, up to 33,000 chunks; 4 vCPU): drawing the
+sections around a hub the first time, labels included, took 138 ms at the median and 1.0 s at most; drawn again,
+10 ms and 19 ms. Most of the first time is counting each candidate term in the full-text index. Listing the hubs
+takes up to 0.85 s on the largest namespaces whether labels are kept or not: that is the query over all edges.
+Text extracted from scanned books still yields some OCR noise as terms; sections with knowledge-graph entities
+read better.
+
 ## Deletes by prefix
 
 A prefix is turned into a range on the unique index of ids: ids starting with `p` are those `>= p` and `< p'`,

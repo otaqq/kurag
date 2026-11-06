@@ -7,10 +7,15 @@ works inside (terms, scores, quantization, graphs) is in [search.md](search.md).
 ## State (v0.1.0)
 
 Built: `kurag-core` (tokenizer, scores, ids and namespaces, API types) and the `kurag` server with every API v1
-route (no UI yet). It passes the contract tests, as txtai-kura does. Differences from the plan below, for now:
+route, and the graph view (`/ui`, the txtai-kura view ported, nodes labelled with keywords: search.md, "Graph view
+and section labels"). It passes the contract tests, as txtai-kura does. Differences from the plan below, for now:
 
 - **Settings from the environment only** (`LISTEN`, `DATA_DIR`, `API_KEY`, `EMBED_URL`, `EMBED_MODEL`,
-  `EMBED_API_KEY`, `EMBED_BATCH`, `EDGE_NEIGHBOURS`, `EDGE_MIN`); the TOML file comes later.
+  `EMBED_API_KEY`, `EMBED_BATCH`, `EDGE_NEIGHBOURS`, `EDGE_MIN`, `UI_USER`, `UI_PASSWORD`); the TOML file comes
+  later. Without `UI_PASSWORD` there is no `/ui`.
+- **The UI is plain files** (`ui/`: HTML, JavaScript, CSS and Cytoscape.js 3.30.2 in `ui/vendor/`), built into the
+  binary with the cargo feature `ui` (on by default), behind a Basic login. No build step and no request to a CDN.
+  It is read-only: search, hubs, sections around one, the text of a section; the knowledge-graph view comes later.
 - **No Backend trait yet.** The SQLite backend is called directly; the trait is cut out of it when a second
   backend is written, so that it follows real code rather than a guess.
 - **Vectors: exact search over 8-bit vectors in memory** (`vectors.rs`: a range per dimension learned from the
@@ -109,6 +114,7 @@ flowchart LR
 | `types` | core | Serde types of every request and answer: the API in code |
 | `Backend` | core | The trait each storage engine implements (design.md, "Backend trait") |
 | `http` | server | axum routes, API key, UI login, static UI files |
+| `sections` | server | The graph view's sections: links, hubs, keyword labels (search.md) |
 | `search` | server | Picks namespaces, embeds the query once, asks each namespace, merges |
 | `write` | server | Embeds outside the namespace lock, then writes in one transaction |
 | `namespaces` | server | Opens a namespace on first use, one lock each, closes idle ones to free memory |
@@ -241,8 +247,8 @@ Cargo.toml            workspace
 crates/kurag-core/    library
 crates/kurag/         server + CLI
 crates/kurag-sync/    client: sources -> chunks -> server; knowledge graph extraction
-ui/                   kurag-ui: the browser app (own build); its output is embedded in the server
-                      (feature "ui", served at /ui) or hosted on its own against the API
+ui/                   kurag-ui: the graph view, plain files built into the server (feature "ui", served
+                      at /ui); ui/vendor/ holds Cytoscape.js
 tests/contract/       black-box HTTP tests (run against any server with this API) and fake-embed, the
                       stand-in embedding API they need (design.md, "Contract tests")
 docs/                 design.md, architecture.md, api.md, ...

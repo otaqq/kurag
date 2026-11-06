@@ -6,9 +6,15 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+default = ["ui"]
+# the graph view, built into the binary and served at /ui
+ui = ["dep:base64"]
+
 [dependencies]
 kurag-core = { path = "../kurag-core" }
 axum = "0.8"
+base64 = { version = "0.22", optional = true }
 half = "2"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 rusqlite = { version = "0.37", features = ["bundled"] }

@@ -22,6 +22,11 @@ pub struct Config {
     pub edge_neighbours: usize,
     /// `EDGE_MIN`, default 0.4: weaker links are not kept
     pub edge_min: f32,
+    /// `UI_USER`, `UI_PASSWORD`: the graph view's login (Basic auth); without a password there is no `/ui`
+    #[cfg_attr(not(feature = "ui"), allow(dead_code))]
+    pub ui_user: String,
+    #[cfg_attr(not(feature = "ui"), allow(dead_code))]
+    pub ui_password: Option<String>,
 }
 
 pub(crate) fn var(name: &str) -> Option<String> {
@@ -48,6 +53,8 @@ impl Config {
             embed_batch: parsed("EMBED_BATCH", 64)?.max(1),
             edge_neighbours: parsed("EDGE_NEIGHBOURS", 10)?,
             edge_min: parsed("EDGE_MIN", 0.4)?,
+            ui_user: var("UI_USER").unwrap_or_default(),
+            ui_password: var("UI_PASSWORD"),
         })
     }
 }

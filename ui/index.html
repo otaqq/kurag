@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kurag graph</title>
+<!-- Cytoscape.js 3.30.2 (MIT, ui/vendor): graph drawing -->
+<script src="/ui/vendor/cytoscape.min.js"></script>
+<link rel="stylesheet" href="/ui/style.css">
+</head>
+<body>
+<header>
+  <h1>kurag</h1>
+  <span id="modes"><button id="m-tree">Tree</button><button id="m-crumbs">Levels</button></span>
+  <button id="treebtn" title="Show or hide the tree">☰</button>
+  <span id="crumbs"></span>
+  <input id="q" type="search" placeholder="Search this namespace (Enter)">
+  <label>Steps <select id="depth"><option>1</option><option>2</option></select></label>
+  <label>Edge similarity ≥ <input id="min" type="range" min="0.4" max="0.95" step="0.01" value="0.75"> <span id="minv">0.75</span></label>
+  <span id="stats"></span>
+</header>
+<main>
+  <nav id="tree"><input id="tree-q" type="search" placeholder="Filter namespaces"><div id="tree-list"></div></nav>
+  <section id="hits" hidden><h3><button id="hits-close">×</button><span id="hits-title"></span></h3><ol id="hits-list"></ol></section>
+  <div id="graph"><div id="cy"></div><div id="hint"></div></div>
+  <aside id="side"><button id="close">×</button><button id="around" title="Draw the sections around this one (or double-click it)">Around this</button><h2 id="title"></h2><div class="src" id="src"></div><pre id="text"></pre></aside>
+</main>
+<script src="/ui/app.js"></script>
+</body>
+</html>

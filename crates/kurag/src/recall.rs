@@ -73,6 +73,8 @@ pub async fn run(path: &Path, data: &Path) -> Result<(), String> {
         embed_batch: parsed("EMBED_BATCH", 64)?.max(1),
         edge_neighbours: 0,
         edge_min: 0.0,
+        ui_user: String::new(),
+        ui_password: None,
     };
     let embedder = Embedder::new(&cfg);
     let store = Store::new(data.to_path_buf());

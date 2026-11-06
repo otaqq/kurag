@@ -1,0 +1,51 @@
+:root { --bg: #fafafa; --fg: #222; --muted: #777; --panel: #fff; --line: #ddd; --accent: #2563eb; }
+@media (prefers-color-scheme: dark) { :root { --bg: #16181d; --fg: #e6e6e6; --muted: #999; --panel: #1f2229; --line: #333; --accent: #60a5fa; } }
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(--fg); height: 100vh; display: flex; flex-direction: column; }
+header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--line); }
+header h1 { font-size: 16px; margin: 0 8px 0 0; }
+select, input[type=search] { font: inherit; padding: 4px 6px; background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; }
+#stats { color: var(--muted); }
+main { flex: 1; display: flex; min-height: 0; position: relative; }
+button { font: inherit; color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 2px 8px; cursor: pointer; }
+button[aria-pressed=true] { border-color: var(--accent); color: var(--accent); }
+/* Two ways to choose a namespace, switched in the header: a tree on the left, or one drop-down per level */
+#modes { display: flex; gap: 4px; }
+#crumbs { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+#crumbs .sep { color: var(--muted); }
+body.mode-tree #crumbs, body.mode-crumbs #tree, body.mode-crumbs #treebtn { display: none; }
+#tree { width: 260px; flex: none; border-right: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+#tree.closed { display: none; }
+#tree input { margin: 8px; }
+#tree-list { overflow: auto; flex: 1; padding: 0 4px 8px; }
+#tree ul { list-style: none; margin: 0; padding-left: 14px; }
+#tree-list > ul { padding-left: 0; }
+#tree .row { display: flex; align-items: center; gap: 2px; padding: 1px 4px; border-radius: 4px; cursor: pointer; white-space: nowrap; }
+#tree .row:hover { background: var(--bg); }
+#tree .row.current { background: var(--accent); color: #fff; }
+#tree .row:not(.namespace) .name { color: var(--muted); }
+#tree .row.current .name { color: #fff; }
+#tree .twisty { border: 0; background: none; color: inherit; width: 18px; padding: 0; flex: none; }
+#tree .name { overflow: hidden; text-overflow: ellipsis; flex: 1; }
+#tree .count { font-size: 11px; opacity: 0.7; }
+#cy { flex: 1; min-width: 0; }
+#graph { flex: 1; min-width: 0; display: flex; position: relative; }
+#hint { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); pointer-events: none; padding: 16px; text-align: center; }
+/* search hits: pick one to draw the sections around it */
+#hits { width: 280px; flex: none; border-right: 1px solid var(--line); background: var(--panel); overflow: auto; padding: 8px; }
+#hits h3 { font-size: 13px; margin: 0 0 6px; color: var(--muted); font-weight: normal; }
+#hits h3 button { float: right; }
+#hits ol { margin: 0; padding-left: 22px; }
+#hits li { padding: 3px 0; cursor: pointer; }
+#hits li:hover .label, #hits li.current .label { color: var(--accent); }
+#hits .file { display: block; color: var(--muted); font-size: 11px; word-break: break-all; }
+aside { width: min(40%, 520px); border-left: 1px solid var(--line); background: var(--panel); overflow: auto; padding: 12px 16px; display: none; }
+aside.open { display: block; }
+aside h2 { font-size: 15px; margin: 0 0 4px; }
+aside .src { color: var(--muted); font-size: 12px; margin-bottom: 8px; word-break: break-all; }
+aside pre { white-space: pre-wrap; word-break: break-word; font: 13px/1.6 system-ui, sans-serif; margin: 0; }
+aside button { float: right; }
+@media (max-width: 700px) { #hits { position: absolute; inset: 0 auto 0 0; width: min(85%, 320px); z-index: 1; } }
+@media (max-width: 700px) { #tree { position: absolute; inset: 0 auto 0 0; width: min(85%, 320px); z-index: 2; } }
+@media (max-width: 700px) { aside { position: fixed; inset: 40% 0 0 0; width: auto; border-left: 0; border-top: 1px solid var(--line); } }
