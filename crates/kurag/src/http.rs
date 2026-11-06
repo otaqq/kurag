@@ -42,6 +42,7 @@ impl From<store::Error> for ApiError {
             store::Error::Bad(m) => ApiError::Status(StatusCode::BAD_REQUEST, m),
             store::Error::Db(e) => ApiError::Status(StatusCode::INTERNAL_SERVER_ERROR, format!("database: {e}")),
             store::Error::Io(e) => ApiError::Status(StatusCode::INTERNAL_SERVER_ERROR, format!("files: {e}")),
+            store::Error::Backend(e) => ApiError::Status(StatusCode::BAD_GATEWAY, format!("vector index: {e}")),
         }
     }
 }

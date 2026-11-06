@@ -101,9 +101,62 @@ vectors has doubled since they were learned (in between, values outside the rang
 learns them from its first upsert, so the first doubling comes soon.
 
 **Search is exact**: the query is compared with every vector of the namespace and the best k are kept, with no
-index to build or tune (measured times are in architecture.md). An ANN index (HNSW,
-IVF, disk-based) comes when measurements show exact search is too slow for the data (design.md, "Choosing the
-ANN index").
+index to build or tune (measured times are in architecture.md). This is the `memory` backend, the default; the
+next section puts the search in an existing engine instead.
+
+## Vector index backends: txtai and HelixDB
+
+`VECTOR_BACKEND` chooses where nearest-neighbour search runs (`backend.rs`):
+
+| Backend | Engine | Index |
+|---|---|---|
+| `memory` (default) | this process | 8-bit, exact (above) |
+| `txtai` | txtai's ANN (faiss), in the small service `backends/txtai/` | SQ8; IVF for an index built on 100,000 vectors or more, a quarter of its cells searched (as txtai-kura) |
+| `helixdb` | a HelixDB server, through its HTTP API (`VECTOR_URL`) | HNSW, float32, on disk |
+
+The engine holds only (chunk row id, vector) per namespace. Everything the engines do not do, or do differently,
+stays in kurag and is the same whatever the backend: terms and full text (neither engine cuts Japanese), the
+text score and RRF, chunk ids and prefix deletes, similarity edges, the knowledge graph with provenance, section
+labels, the API. The float16 copy of every vector stays in the namespace's database and is the truth: kurag fills
+the engine's index from it when the index holds a different count (an empty engine, data imported or copied), after
+a failed write, and on `/rebuild`, without calling the embedding API. Writes go to the engine inside the
+namespace's transaction, so a failure rolls the chunk rows back. The cosine similarity of a hit found only by text
+is computed from the stored copy.
+
+- **txtai** is reached through `backends/txtai/server.py`, which keeps one txtai ANN per namespace and kurag's row
+  id of each entry. kurag fills an index in batches and then asks for it to be built once, so the index kind is
+  chosen from the whole set; later upserts are appended to it.
+- **HelixDB**: every namespace's vectors are nodes `{ns, vid, v}` of one label (`KuragChunk`), with one cosine
+  vector index on `v` partitioned by tenant `ns` (HelixDB keeps a separate index per namespace inside it) and
+  equality indexes on `ns` and `vid`; one server holds vectors of one dimension. A new index answers only after it
+  is validated and activated (about 20 seconds), so making one per namespace slowed every new namespace: the
+  tenant-partitioned index is made once. Writes and deletes are Cypher statements (`UNWIND ... CREATE`,
+  `MATCH ... DETACH DELETE`; at most 200,000 values per parameter, so large batches are split); creating indexes
+  and vector search are native queries, which Cypher has no syntax for. Concurrent writes may conflict
+  (`transaction_conflict`, retryable) and are sent again. Its HNSW search widens with the number of hits asked
+  for: on 33,000 vectors, recall@5 against exact search was 81 % when asking for 5 or 50 hits, 91 % for 200 and
+  99 % for 800 (HelixDB's cap). Searches therefore ask for 800 and keep the best k; the edges made on upsert, one
+  search per new chunk, ask for ten times k and at least 100.
+
+Measured on copies of five real namespaces (47,313 chunks, 768 dimensions; four of them with the 77 questions of
+an eval set, and the largest, 33,265 chunks, searched with 20 of the questions), each backend on its own copy of the
+same data, the same machine (2 vCPU) and the same embedding API; recall against exact search over the float16
+copies (`kurag recall`):
+
+| | memory | txtai | HelixDB |
+|---|---|---|---|
+| recall@5, 77 questions / top-1 the exact one | 99.0 % / 100 % | 99.7 % / 98.7 % | 99.7 % / 100 % |
+| recall@5 on the largest namespace / top-1 | 98.0 % / 100 % | 100 % / 100 % | 97.0 % / 95.0 % |
+| vector search p50, 77 questions / largest namespace (embedding of the question included) | 37–40 / 59–62 ms | 50 / 45 ms | 142 / 247 ms |
+| hybrid search p50, 77 questions / largest namespace | 53–57 / 155–175 ms | 65 / 151 ms | 157 / 322 ms |
+| filling the index from the copies (47,313 vectors) | 1 s (loading) | 3 s | 50 s |
+| memory | kurag 53 MB | kurag 17 MB + service 95 MiB | kurag 17 MB + server 1.2 GiB |
+
+Hybrid search agreed with the memory backend on 99.2 % (txtai) and 99.5 % (HelixDB) of the top 5 over the 77
+questions, with the same first hit for every question. HelixDB's memory is mostly its caches (960 MiB budgeted of the 1.5 GiB the container could use; HelixDB notes they
+are not a cap on the process). What each brings: txtai the faiss index family (IVF, PQ, memory-mapped indexes) for
+data beyond memory; HelixDB disk storage, a graph engine and BM25 in the same server, which kurag does not use yet
+(design.md, "Open questions").
 
 ## Hybrid search: reciprocal rank fusion
 

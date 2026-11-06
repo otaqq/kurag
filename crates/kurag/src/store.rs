@@ -1,6 +1,7 @@
 //! Namespaces: one folder each under the data folder, with a SQLite database (`kurag.db`, WAL) holding the chunks,
-//! a float16 copy of every vector, the full-text index, the similarity graph and the knowledge graph. The 8-bit
-//! vectors in memory (`Vectors`) are loaded from the database when a namespace is opened.
+//! a float16 copy of every vector, the full-text index, the similarity graph and the knowledge graph. The vector
+//! index is either the 8-bit vectors in memory (`Vectors`, loaded from the database when a namespace is opened) or
+//! an external backend (`backend.rs`: txtai, HelixDB), filled from the same float16 copies.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -10,6 +11,7 @@ use half::f16;
 use kurag_core::{ids, score, text, types::Doc};
 use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
 
+use crate::backend::{FILL_BATCH, RemoteIndex};
 use crate::{fts, kg, sections, vectors::{Range, Vectors}};
 
 pub const DB: &str = "kurag.db";
@@ -29,6 +31,8 @@ pub enum Error {
     Bad(String),
     Db(rusqlite::Error),
     Io(std::io::Error),
+    /// the external vector index failed: 502
+    Backend(String),
 }
 
 impl From<rusqlite::Error> for Error {
@@ -53,7 +57,11 @@ pub struct Namespace {
 
 pub struct Inner {
     pub db: Connection,
+    /// the in-memory index (backend `memory`)
     vecs: Option<Vectors>,
+    /// an external index (backend `txtai` or `helixdb`), instead of `vecs`
+    remote: Option<Arc<dyn RemoteIndex>>,
+    name: String,
 }
 
 fn to_f16_bytes(v: &[f32]) -> Vec<u8> {
@@ -69,13 +77,13 @@ fn in_parts(n: usize) -> impl Iterator<Item = std::ops::Range<usize>> {
 }
 
 impl Namespace {
-    fn open(name: &str, path: &Path) -> Result<Namespace> {
+    fn open(name: &str, path: &Path, remote: Option<Arc<dyn RemoteIndex>>) -> Result<Namespace> {
         std::fs::create_dir_all(path)?;
         let db = Connection::open(path.join(DB))?;
         db.query_row("pragma journal_mode=wal", [], |_| Ok(()))?;
         db.execute_batch("pragma synchronous=normal")?;
         db.execute_batch(&format!("{SCHEMA}{}{}{}", fts::SCHEMA, kg::SCHEMA, sections::SCHEMA))?;
-        let mut inner = Inner { db, vecs: None };
+        let mut inner = Inner { db, vecs: None, remote, name: name.to_string() };
         inner.load_vectors()?;
         Ok(Namespace { name: name.to_string(), inner: Mutex::new(inner) })
     }
@@ -89,6 +97,9 @@ impl Inner {
     /// Loads the 8-bit vectors from the stored float16 copies, learning the ranges from them first (two passes,
     /// so the float copies are never all in memory at once).
     fn load_vectors(&mut self) -> Result<usize> {
+        if self.remote.is_some() {
+            return self.sync_remote(false);
+        }
         let mut range: Option<Range> = None;
         {
             let mut st = self.db.prepare("select v from vectors")?;
@@ -115,11 +126,59 @@ impl Inner {
         Ok(n)
     }
 
-    /// Builds the vectors in memory again from the stored copies, and forgets the section labels; the number of
+    /// Fills the external index from the stored copies when it does not hold as many vectors as the database, or
+    /// always when `force`; the number of vectors.
+    fn sync_remote(&mut self, force: bool) -> Result<usize> {
+        let remote = self.remote.clone().expect("external index");
+        let n: i64 = self.db.query_row("select count(*) from vectors", [], |r| r.get(0))?;
+        let held = remote.count(&self.name).map_err(Error::Backend)?;
+        if !force && held == n as usize {
+            return Ok(held);
+        }
+        remote.clear(&self.name).map_err(Error::Backend)?;
+        let mut st = self.db.prepare("select vid, v from vectors order by vid")?;
+        let mut rows = st.query([])?;
+        let mut batch: Vec<(i64, Vec<f32>)> = Vec::with_capacity(FILL_BATCH);
+        let send = |batch: &mut Vec<(i64, Vec<f32>)>| -> Result<()> {
+            let items: Vec<(i64, &[f32])> = batch.iter().map(|(vid, v)| (*vid, v.as_slice())).collect();
+            remote.fill(&self.name, &items).map_err(Error::Backend)?;
+            batch.clear();
+            Ok(())
+        };
+        while let Some(r) = rows.next()? {
+            batch.push((r.get(0)?, from_f16_bytes(&r.get::<_, Vec<u8>>(1)?)));
+            if batch.len() == FILL_BATCH {
+                send(&mut batch)?;
+            }
+        }
+        send(&mut batch)?;
+        remote.fill_done(&self.name).map_err(Error::Backend)?;
+        Ok(n as usize)
+    }
+
+    /// Builds the vector index again from the stored copies, and forgets the section labels; the number of
     /// vectors.
     pub fn rebuild(&mut self) -> Result<usize> {
         sections::forget_all(&self.db)?;
+        if self.remote.is_some() {
+            return self.sync_remote(true);
+        }
         self.load_vectors()
+    }
+
+    /// Dimensions of the stored vectors (float16: two bytes each), None when there is none.
+    fn stored_dims(&self) -> Result<Option<usize>> {
+        Ok(self.db.query_row("select length(v) / 2 from vectors limit 1", [], |r| r.get::<_, i64>(0)).optional()?.map(|d| d as usize))
+    }
+
+    /// The stored float16 copy of a chunk's vector.
+    fn stored_vector(&self, vid: i64) -> Result<Option<Vec<f32>>> {
+        Ok(self
+            .db
+            .prepare_cached("select v from vectors where vid = ?1")?
+            .query_row([vid], |r| r.get::<_, Vec<u8>>(0))
+            .optional()?
+            .map(|b| from_f16_bytes(&b)))
     }
 
     pub fn count(&self) -> Result<i64> {
@@ -200,18 +259,19 @@ impl Inner {
     /// the number of chunks. One transaction: on failure nothing changes.
     pub fn upsert(&mut self, docs: &[Doc], vectors: &[Vec<f32>], neighbours: usize, edge_min: f32) -> Result<i64> {
         let dims = vectors.first().map_or(0, Vec::len);
-        if let Some(v) = &self.vecs
-            && v.len() > 0
-            && v.dims() != dims
+        if let Some(have) = self.stored_dims()?
+            && have != dims
         {
             return Err(Error::Bad(format!(
-                "vectors of {dims} dimensions, the namespace has {}: another embedding model?",
-                v.dims()
+                "vectors of {dims} dimensions, the namespace has {have}: another embedding model?"
             )));
         }
         let result = self.upsert_tx(docs, vectors, neighbours, edge_min);
         match &result {
-            // the transaction was rolled back: memory follows the database
+            // the transaction was rolled back: the index follows the database
+            Err(_) if self.remote.is_some() => {
+                self.sync_remote(true)?;
+            }
             Err(_) => {
                 self.load_vectors()?;
             }
@@ -228,6 +288,11 @@ impl Inner {
         let tx = self.db.unchecked_transaction()?;
         let old = self.vids_of_ids(&docs.iter().map(|d| d.id.as_str()).collect::<Vec<_>>())?;
         self.remove_rows(&old)?;
+        if let Some(remote) = self.remote.clone() {
+            self.upsert_remote(&tx, &remote, &old, docs, vectors, neighbours, edge_min)?;
+            tx.commit()?;
+            return self.count();
+        }
         let vecs = self.vecs.get_or_insert_with(|| {
             // a new namespace: ranges from this first batch
             let mut range = Range::new(vectors[0].len());
@@ -266,6 +331,52 @@ impl Inner {
         self.count()
     }
 
+    /// `upsert_tx` with an external index: the rows are written in the transaction, the vectors sent to the index
+    /// before it commits (a failure rolls the rows back and the caller fills the index again).
+    #[allow(clippy::too_many_arguments)]
+    fn upsert_remote(
+        &self,
+        tx: &rusqlite::Transaction<'_>,
+        remote: &Arc<dyn RemoteIndex>,
+        old: &[i64],
+        docs: &[Doc],
+        vectors: &[Vec<f32>],
+        neighbours: usize,
+        edge_min: f32,
+    ) -> Result<()> {
+        remote.remove(&self.name, old).map_err(Error::Backend)?;
+        let mut vids = Vec::with_capacity(docs.len());
+        {
+            let mut chunk = tx.prepare_cached("insert into chunks(id, section, source, text) values (?1, ?2, ?3, ?4)")?;
+            let mut vector = tx.prepare_cached("insert into vectors(vid, v) values (?1, ?2)")?;
+            for (d, v) in docs.iter().zip(vectors) {
+                chunk.execute(params![d.id, ids::section_of(&d.id), d.source, d.text])?;
+                let vid = tx.last_insert_rowid();
+                vector.execute(params![vid, to_f16_bytes(v)])?;
+                vids.push(vid);
+            }
+        }
+        for part in in_parts(vids.len()) {
+            let items: Vec<(i64, &[f32])> = part.clone().map(|i| (vids[i], vectors[i].as_slice())).collect();
+            remote.add(&self.name, &items).map_err(Error::Backend)?;
+        }
+        sections::forget_vids(tx, &vids)?;
+        let rows: Vec<(i64, &str)> = vids.iter().copied().zip(docs.iter().map(|d| d.text.as_str())).collect();
+        fts::add(tx, "fts", &rows)?;
+        {
+            let mut edge = tx.prepare_cached("insert or replace into edges(a, b, w) values (?1, ?2, ?3)")?;
+            for (&vid, v) in vids.iter().zip(vectors) {
+                for (other, s) in remote.neighbours(&self.name, v, neighbours + 1).map_err(Error::Backend)? {
+                    if other != vid && s >= edge_min {
+                        edge.execute(params![vid, other, s as f64])?;
+                        edge.execute(params![other, vid, s as f64])?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Deletes the chunks with these id prefixes, and what the knowledge graph learned from them; how many chunks.
     pub fn delete(&mut self, prefixes: &[String]) -> Result<usize> {
         let tx = self.db.unchecked_transaction()?;
@@ -275,6 +386,13 @@ impl Inner {
         tx.commit()?;
         if let Some(v) = &mut self.vecs {
             vids.iter().for_each(|&vid| v.remove(vid));
+        }
+        if let Some(remote) = self.remote.clone() {
+            let removed = in_parts(vids.len()).try_for_each(|r| remote.remove(&self.name, &vids[r]));
+            if let Err(e) = removed {
+                // the rows are gone: fill the index again from what is left, or report both failures
+                self.sync_remote(true).map_err(|again| Error::Backend(format!("{e}; filling it again: {again:?}")))?;
+            }
         }
         Ok(vids.len())
     }
@@ -295,12 +413,20 @@ impl Inner {
     }
 
     /// (vid, cosine similarity), best first.
-    pub fn vector_search(&self, q: &[f32], limit: usize) -> Vec<(i64, f64)> {
-        self.vecs.as_ref().map_or(Vec::new(), |v| v.nearest(q, limit).into_iter().map(|(vid, s)| (vid, s as f64)).collect())
+    pub fn vector_search(&self, q: &[f32], limit: usize) -> Result<Vec<(i64, f64)>> {
+        if let Some(remote) = &self.remote {
+            let hits = remote.nearest(&self.name, q, limit).map_err(Error::Backend)?;
+            return Ok(hits.into_iter().map(|(vid, s)| (vid, s as f64)).collect());
+        }
+        Ok(self.vecs.as_ref().map_or(Vec::new(), |v| v.nearest(q, limit).into_iter().map(|(vid, s)| (vid, s as f64)).collect()))
     }
 
-    /// Cosine similarity of the query to a chunk.
+    /// Cosine similarity of the query to a chunk (with an external index, from the stored float16 copy).
     pub fn similarity(&self, q: &[f32], vid: i64) -> Option<f64> {
+        if self.remote.is_some() {
+            let v = self.stored_vector(vid).ok()??;
+            return Some(q.iter().zip(&v).map(|(a, b)| (a * b) as f64).sum());
+        }
         self.vecs.as_ref()?.similarity(q, vid).map(f64::from)
     }
 
@@ -336,11 +462,13 @@ impl Inner {
 pub struct Store {
     data: PathBuf,
     open: Mutex<HashMap<String, Arc<Namespace>>>,
+    remote: Option<Arc<dyn RemoteIndex>>,
 }
 
 impl Store {
-    pub fn new(data: PathBuf) -> Store {
-        Store { data, open: Mutex::new(HashMap::new()) }
+    /// The store; `remote` is the external vector index, None for the in-memory one.
+    pub fn new(data: PathBuf, remote: Option<Arc<dyn RemoteIndex>>) -> Store {
+        Store { data, open: Mutex::new(HashMap::new()), remote }
     }
 
     fn registry(&self) -> MutexGuard<'_, HashMap<String, Arc<Namespace>>> {
@@ -375,7 +503,7 @@ impl Store {
         if !path.join(DB).exists() && !create {
             return Ok(None);
         }
-        let ns = Arc::new(Namespace::open(name, &path)?);
+        let ns = Arc::new(Namespace::open(name, &path, self.remote.clone())?);
         open.insert(name.to_string(), ns.clone());
         Ok(Some(ns))
     }
@@ -383,6 +511,9 @@ impl Store {
     /// Removes a namespace and its folder.
     pub fn drop_namespace(&self, name: &str) -> Result<()> {
         self.registry().remove(name);
+        if let Some(remote) = &self.remote {
+            remote.clear(name).map_err(Error::Backend)?;
+        }
         let path = self.data.join(name);
         if path.exists() {
             std::fs::remove_dir_all(path)?;

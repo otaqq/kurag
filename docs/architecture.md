@@ -11,17 +11,19 @@ route, and the graph view (`/ui`, the txtai-kura view ported, nodes labelled wit
 and section labels"). It passes the contract tests, as txtai-kura does. Differences from the plan below, for now:
 
 - **Settings from the environment only** (`LISTEN`, `DATA_DIR`, `API_KEY`, `EMBED_URL`, `EMBED_MODEL`,
-  `EMBED_API_KEY`, `EMBED_BATCH`, `EDGE_NEIGHBOURS`, `EDGE_MIN`, `UI_USER`, `UI_PASSWORD`); the TOML file comes
-  later. Without `UI_PASSWORD` there is no `/ui`.
+  `EMBED_API_KEY`, `EMBED_BATCH`, `EDGE_NEIGHBOURS`, `EDGE_MIN`, `VECTOR_BACKEND`, `VECTOR_URL`, `UI_USER`,
+  `UI_PASSWORD`); the TOML file comes later. Without `UI_PASSWORD` there is no `/ui`.
 - **The UI is plain files** (`ui/`: HTML, JavaScript, CSS and Cytoscape.js 3.30.2 in `ui/vendor/`), built into the
   binary with the cargo feature `ui` (on by default), behind a Basic login. No build step and no request to a CDN.
   It is read-only: search, hubs, sections around one, the text of a section; the knowledge-graph view comes later.
-- **No Backend trait yet.** The SQLite backend is called directly; the trait is cut out of it when a second
-  backend is written, so that it follows real code rather than a guess.
-- **Vectors: exact search over 8-bit vectors in memory** (`vectors.rs`: a range per dimension learned from the
-  vectors, each component stored as one of 256 steps in it, as in faiss's SQ8; loaded from the float16 copies in
-  `kurag.db` when a namespace opens, learned again on `/rebuild` and when the number of vectors has doubled). No
-  ANN index until measurements call for one.
+- **The backend trait covers the vector index** (`backend.rs`, `RemoteIndex`): `VECTOR_BACKEND=memory` (default)
+  is exact search over 8-bit vectors in memory (`vectors.rs`: a range per dimension learned from the vectors, as in
+  faiss's SQ8; loaded from the float16 copies in `kurag.db` when a namespace opens, learned again on `/rebuild`
+  and when the number of vectors has doubled); `txtai` puts the search in txtai's ANN (faiss) through
+  `backends/txtai/`; `helixdb` in a HelixDB server (HNSW, on disk). Chunks, full text, edges and the knowledge
+  graph stay in SQLite for every backend; the external index is filled from the float16 copies (search.md, "Vector
+  index backends", with measurements). The other parts of the planned trait (full text, graph) are cut out when an
+  engine is used for them.
 - **One embedding URL**; no failover list or external picker yet.
 - Chunks sent again with the same text reuse their stored vectors (no embedding call); they still get a new row id,
   so the knowledge graph treats them as to do again, as txtai-kura does.
@@ -115,6 +117,7 @@ flowchart LR
 | `Backend` | core | The trait each storage engine implements (design.md, "Backend trait") |
 | `http` | server | axum routes, API key, UI login, static UI files |
 | `sections` | server | The graph view's sections: links, hubs, keyword labels (search.md) |
+| `backend` | server | External vector indexes (txtai, HelixDB) behind one trait, filled from the stored copies |
 | `search` | server | Picks namespaces, embeds the query once, asks each namespace, merges |
 | `write` | server | Embeds outside the namespace lock, then writes in one transaction |
 | `namespaces` | server | Opens a namespace on first use, one lock each, closes idle ones to free memory |
@@ -232,6 +235,10 @@ One static binary (`kurag`, x86-64 musl, about 8 MB), shipped two ways:
   `dist/systemd/kurag.service` runs it as user `kurag` with data in `/var/lib/kurag` and settings in
   `/etc/kurag/kurag.env`.
 
+With `VECTOR_BACKEND=txtai`, run `backends/txtai` next to it (`docker build -t kurag-txtai backends/txtai`, port
+9670, its indexes in its own `DATA_DIR`); with `helixdb`, a HelixDB server (`ghcr.io/helixdb/helixdb`, port 8080,
+`HELIX_DATA_DIR` on a volume). `VECTOR_URL` points kurag at either.
+
 The release profile (LTO, one codegen unit, stripped) is set by environment variables in the Dockerfile, not in
 `Cargo.toml`, so that local release builds stay fast. Required settings: `API_KEY` and `EMBED_URL` (the server
 exits with a message without them). TLS to the embedding API uses the bundled Mozilla roots (webpki-roots), not the
@@ -253,6 +260,7 @@ tests/contract/       black-box HTTP tests (run against any server with this API
                       stand-in embedding API they need (design.md, "Contract tests")
 docs/                 design.md, architecture.md, api.md, ...
 docker/               Dockerfile: the image, or only the binary (--target bin)
+backends/txtai/       kurag-txtai: txtai's ANN behind a small HTTP API (VECTOR_BACKEND=txtai), own Dockerfile
 dist/systemd/         kurag.service, an example unit for the binary
 charts/kurag/         (later) Helm chart
 ```

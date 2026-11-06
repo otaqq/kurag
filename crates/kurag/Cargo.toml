@@ -9,14 +9,14 @@ repository.workspace = true
 [features]
 default = ["ui"]
 # the graph view, built into the binary and served at /ui
-ui = ["dep:base64"]
+ui = []
 
 [dependencies]
 kurag-core = { path = "../kurag-core" }
 axum = "0.8"
-base64 = { version = "0.22", optional = true }
+base64 = "0.22"
 half = "2"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

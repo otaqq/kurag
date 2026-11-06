@@ -59,10 +59,6 @@ impl Vectors {
         Vectors { dims, min, step, codes: Vec::new(), vids: Vec::new(), pos: HashMap::new(), trained_on: range.count }
     }
 
-    pub fn dims(&self) -> usize {
-        self.dims
-    }
-
     pub fn len(&self) -> usize {
         self.vids.len()
     }

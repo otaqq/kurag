@@ -111,7 +111,7 @@ async fn search(State(app): S, Path(name): Path<String>, Query(p): Query<SearchQ
         .unwrap_or_default();
     blocking(move || {
         let inner = ns.lock();
-        let hits = inner.vector_search(&q, limit * 3);
+        let hits = inner.vector_search(&q, limit * 3)?;
         let rows = inner.chunks(&hits.iter().map(|h| h.0).collect::<Vec<_>>())?;
         // by score: the first chunk of a section is its best
         let mut best: Vec<(String, f64)> = Vec::new();

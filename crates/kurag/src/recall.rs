@@ -75,9 +75,11 @@ pub async fn run(path: &Path, data: &Path) -> Result<(), String> {
         edge_min: 0.0,
         ui_user: String::new(),
         ui_password: None,
+        vector_backend: String::new(),
+        vector_url: None,
     };
     let embedder = Embedder::new(&cfg);
-    let store = Store::new(data.to_path_buf());
+    let store = Store::new(data.to_path_buf(), None);
     let mut servers = Vec::new();
     for (name, p) in [("A", "A"), ("B", "B")] {
         if let Some(url) = var(&format!("{p}_URL")) {

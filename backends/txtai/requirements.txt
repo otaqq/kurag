@@ -1,0 +1,4 @@
+# txtai without torch (vectors come from kurag), and faiss for its ANN
+txtai_minimal==9.14.0
+faiss-cpu==1.13.2
+numpy

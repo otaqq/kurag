@@ -169,6 +169,12 @@ analyzer for it), scoring, fusion and expansion.
 The first backend is **SQLite** (FTS5 for full text, one file per namespace) plus an ANN index. The ANN index is
 chosen by measurement (next section).
 
+Built so far: the **vector part** of the trait, with three implementations: kurag's own exact 8-bit search, txtai's
+ANN (faiss) and HelixDB (HNSW). The rest stays in SQLite until an engine is used for it; kurag's own value is the
+layer above, which no engine provides (Japanese full text, coverage scoring and fusion, chunk ids and prefix
+deletes, a knowledge graph with provenance and a work list). Measurements are in search.md, "Vector index
+backends".
+
 ## Choosing the ANN index
 
 Measured on a copy of real data (stored vectors, no re-embedding), at today's size and at a multiple of it.
@@ -210,3 +216,9 @@ first answer and stops using one that differs, since mixed models make cosine sc
 
 - Japanese tokenizer: keep bigrams only, or add a dictionary tokenizer (Lindera) as an option?
 - Embedding: keep calling an OpenAI-compatible API (LiteLLM, Ollama), or also accept vectors from the client?
+- HelixDB beyond vectors: its graph traversal (prefiltered search: traverse, then rank only what was reached) and
+  BM25 would let the knowledge graph and full text move into the same server. Full text needs kurag's terms fed
+  through its whitespace analyzer (no CJK analyzer).
+- Which backend for which size: txtai's IVF / memory-mapped indexes and HelixDB's disk storage are for data that
+  no longer fits in memory. At today's size txtai and the in-memory index are about as fast and as exact, and
+  HelixDB is slower and needs more memory (search.md, "Vector index backends").

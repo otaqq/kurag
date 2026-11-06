@@ -23,7 +23,8 @@ const COPY: &[(&str, &str)] = &[
 ];
 
 pub fn run(src: &Path, data: &Path) -> Result<(), String> {
-    let st = store::Store::new(data.to_path_buf());
+    // the in-memory index: an external one is filled from the copies when the server opens the namespace
+    let st = store::Store::new(data.to_path_buf(), None);
     let have = st.names();
     let mut names: Vec<String> = std::fs::read_dir(src)
         .map_err(|e| format!("{}: {e}", src.display()))?

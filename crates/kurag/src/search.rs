@@ -32,7 +32,7 @@ pub fn run(spaces: &[Arc<Namespace>], req: &Search, q: Option<&[f32]>) -> Result
     for (i, ns) in spaces.iter().enumerate() {
         let inner = ns.lock();
         if let Some(q) = q {
-            vec_hits.extend(inner.vector_search(q, want).into_iter().map(|(vid, s)| (s, i, vid)));
+            vec_hits.extend(inner.vector_search(q, want)?.into_iter().map(|(vid, s)| (s, i, vid)));
         }
         if req.mode != Mode::Vector {
             let hits = inner.text_search(&req.query, want)?;

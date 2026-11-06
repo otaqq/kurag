@@ -1,5 +1,6 @@
 //! kurag: a retrieval server for RAG. Settings come from the environment (see config.rs).
 
+mod backend;
 mod config;
 mod embed;
 mod fts;
@@ -53,8 +54,19 @@ async fn main() {
             std::process::exit(2);
         }
     };
+    // the external index's HTTP client is a blocking one (used from the blocking pool): made outside the runtime
+    let (kind, url) = (cfg.vector_backend.clone(), cfg.vector_url.clone());
+    let made = std::thread::spawn(move || backend::from_settings(&kind, url.as_deref())).join().expect("backend thread");
+    let remote = match made {
+        Ok(r) => r.map(Arc::from),
+        Err(e) => {
+            eprintln!("kurag: {e}");
+            std::process::exit(2);
+        }
+    };
+    let index = remote.as_ref().map_or("memory".to_string(), |r: &Arc<dyn backend::RemoteIndex>| r.name().to_string());
     let app = Arc::new(http::App {
-        store: store::Store::new(cfg.data_dir.clone()),
+        store: store::Store::new(cfg.data_dir.clone(), remote),
         embed: embed::Embedder::new(&cfg),
         cfg,
     });
@@ -62,7 +74,7 @@ async fn main() {
         eprintln!("kurag: cannot listen on {}: {e}", app.cfg.listen);
         std::process::exit(2);
     });
-    eprintln!("kurag {}: listening on {}, data in {}", env!("CARGO_PKG_VERSION"), app.cfg.listen, app.cfg.data_dir.display());
+    eprintln!("kurag {}: listening on {}, data in {}, vector index {index}", env!("CARGO_PKG_VERSION"), app.cfg.listen, app.cfg.data_dir.display());
     axum::serve(listener, http::router(app))
         .with_graceful_shutdown(async {
             // SIGINT, or SIGTERM as sent by Kubernetes and systemd

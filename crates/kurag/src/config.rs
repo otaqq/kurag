@@ -22,6 +22,10 @@ pub struct Config {
     pub edge_neighbours: usize,
     /// `EDGE_MIN`, default 0.4: weaker links are not kept
     pub edge_min: f32,
+    /// `VECTOR_BACKEND`: memory (default), txtai or helixdb (backend.rs)
+    pub vector_backend: String,
+    /// `VECTOR_URL`: the txtai service or HelixDB server, for those backends
+    pub vector_url: Option<String>,
     /// `UI_USER`, `UI_PASSWORD`: the graph view's login (Basic auth); without a password there is no `/ui`
     #[cfg_attr(not(feature = "ui"), allow(dead_code))]
     pub ui_user: String,
@@ -53,6 +57,8 @@ impl Config {
             embed_batch: parsed("EMBED_BATCH", 64)?.max(1),
             edge_neighbours: parsed("EDGE_NEIGHBOURS", 10)?,
             edge_min: parsed("EDGE_MIN", 0.4)?,
+            vector_backend: var("VECTOR_BACKEND").unwrap_or_default(),
+            vector_url: var("VECTOR_URL"),
             ui_user: var("UI_USER").unwrap_or_default(),
             ui_password: var("UI_PASSWORD"),
         })
