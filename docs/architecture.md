@@ -1,6 +1,7 @@
 # kurag — architecture (draft)
 
-How kurag is put together. Why it is built this way, and what it does, is in [design.md](design.md). Parts marked
+How kurag is put together. Why it is built this way, and what it does, is in [design.md](design.md); how search
+works inside (terms, scores, quantization, graphs) is in [search.md](search.md). Parts marked
 *to measure* wait for numbers; what is built so far is listed under "State".
 
 ## State (v0.1.0)

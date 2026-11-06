@@ -3,6 +3,9 @@
 kurag is a retrieval server for RAG: vector, full-text and hybrid search, a similarity graph, a knowledge graph,
 and later agent memory, behind one HTTP API. The name is *kura* (蔵, storehouse) + *RAG*.
 
+Docs: this file (why and what), [architecture.md](architecture.md) (parts, state, measurements),
+[search.md](search.md) (how search works).
+
 ## Why
 
 [txtai-kura](https://github.com/otaqq/txtai-kura) showed that most of such a server is not the database engine.
