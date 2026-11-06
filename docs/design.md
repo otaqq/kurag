@@ -90,11 +90,32 @@ not the first choice.
 
 | Crate | What |
 |---|---|
-| `kurag-core` | Library: tokenizer, scoring and fusion, chunk id rules, request and answer types, the backend trait |
+| `kurag-core` | Library: tokenizer, scoring and fusion, chunking and chunk id rules, request and answer types, the backend trait |
 | `kurag` | The server and CLI: HTTP API, auth, UI, backends compiled in by feature |
+| `kurag-ui` (`ui/`) | The browser app: search, graph view, knowledge graph, later memory and admin. Talks only to the API; built on its own, then embedded in the server or hosted separately |
+| `kurag-sync` | The client that fills a server: reads sources, chunks, sends what changed, deletes what is gone, and runs knowledge graph extraction over one or more LLM endpoints |
 
 Clients talk HTTP, so they stay in any language. A Python binding of `kurag-core` can come later if someone
 needs the tokenizer or scoring in-process.
+
+### Why the sync client is here
+
+Whatever engine the server uses, something has to turn files into chunks and keep them in step. That work talks
+only to the API, so it is the same for every backend, and part of it is a rule shared with the server: chunk ids
+(`<source>:<path>#<section>#<n>`) are cut by the client and deleted by prefix on the server. Keeping both sides
+in one workspace keeps that rule in one place.
+
+`kurag-sync` follows [txtai-kura-sync](https://github.com/otaqq/txtai-kura-sync):
+
+| Part | Does |
+|---|---|
+| Sources | git repositories, folders, shelves (folders mapped to namespaces); a config file plus a local override file |
+| Reading | Markdown and text, PDF, EPUB; sections from headings |
+| Changes | state of what was sent (hash, namespace, chunk count); sends changed files, deletes removed ones by prefix |
+| Schedule | `run --due`: only sources whose interval has passed, for cron or a systemd timer |
+| Extraction | asks `/kg/todo`, calls an OpenAI-compatible chat API with a JSON schema, sends results with done marks; several endpoints with request slots, a list file re-read during the run, or an external picker |
+
+It comes after the server: txtai-kura-sync keeps working against kurag meanwhile, because the API is the same.
 
 ## API
 

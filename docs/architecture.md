@@ -156,6 +156,9 @@ Same layout as other Rust services by the same author:
 Cargo.toml            workspace
 crates/kurag-core/    library
 crates/kurag/         server + CLI
+crates/kurag-sync/    client: sources -> chunks -> server; knowledge graph extraction
+ui/                   kurag-ui: the browser app (own build); its output is embedded in the server
+                      (feature "ui", served at /ui) or hosted on its own against the API
 tests/contract/       black-box HTTP tests (run against any server with this API)
 docs/                 design.md, architecture.md, api.md, ...
 docker/  charts/kurag/  dist/systemd/
