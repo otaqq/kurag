@@ -4,6 +4,7 @@ mod config;
 mod embed;
 mod fts;
 mod http;
+mod import;
 mod kg;
 mod search;
 mod store;
@@ -13,6 +14,23 @@ use std::sync::Arc;
 
 #[tokio::main]
 async fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.iter().map(String::as_str).collect::<Vec<_>>()[..] {
+        [] => {}
+        ["import", src] => {
+            let data = std::env::var("DATA_DIR").ok().filter(|v| !v.is_empty()).unwrap_or_else(|| "data".into());
+            if let Err(e) = import::run(std::path::Path::new(src), std::path::Path::new(&data)) {
+                eprintln!("kurag import: {e}");
+                std::process::exit(1);
+            }
+            return;
+        }
+        _ => {
+            eprintln!("usage: kurag                 run the server (settings from the environment)");
+            eprintln!("       kurag import <dir>    copy txtai-kura namespaces (<dir>/<namespace>/kura.db) into DATA_DIR");
+            std::process::exit(2);
+        }
+    }
     let cfg = match config::Config::from_env() {
         Ok(c) => c,
         Err(e) => {

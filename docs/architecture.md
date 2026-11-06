@@ -22,6 +22,39 @@ route (no UI yet). It passes the contract tests, as txtai-kura does. Differences
 
 Measured (development build, after the contract tests, 12 small namespaces): 17.9 MB resident.
 
+### Migration from txtai-kura
+
+`kurag import <dir>` copies txtai-kura v0.3 namespaces (`<dir>/<namespace>/kura.db`) into `DATA_DIR`: chunks with
+their row ids, float16 vectors, similarity edges and the knowledge graph (with done marks) as they are, full-text
+indexes made again with kurag's tokenizer. No embedding calls. Take a copy of a running server's files first
+(SQLite backup), and skip namespaces that already exist.
+
+`compare` (in `kurag-contract`) sends the same queries to two servers and prints, per mode, overlap@5, how often
+the first hit is the same, and latency.
+
+Measured 2026-11-06 on a copy of a real deployment: 48 namespaces, 263,260 chunks, 768 dimensions, 1.5 GB on
+disk; 77 questions from an evaluation set (4 namespaces). txtai-kura v0.3.5 (faiss, 8-bit SQ) and kurag (release
+build, exact search over 8-bit vectors) on different machines, same embedding API:
+
+| | txtai-kura | kurag |
+|---|---|---|
+| Import | | 1 min 8 s, 315 MB peak |
+| Resident, every namespace open | 621 MiB | 330 MB (vectors 202 MB) |
+| vector, one namespace: overlap@5 / top-1 same | | 97.1 % / 94.8 % |
+| text, one namespace | | 99.0 % / 98.7 % |
+| hybrid, one namespace | | 97.4 % / 96.1 % |
+| vector over a tree (`it`, `academic`), ms p50 / p95 | 230 / 328 | 113 / 141 |
+| text over a tree, ms p50 / p95 | 173 / 272 | 333 / 564 |
+| hybrid over a tree, ms p50 / p95 | 484 / 627 | 410 / 622 |
+
+Latency includes embedding the query (vector, hybrid) and the network; the machines differ (kurag ran on a
+2-vCPU VM), so only large gaps mean something. Two findings to follow up:
+
+- Vector results differ in 4-6 of 77 first hits: both quantize to 8 bits, differently (faiss trains the range per
+  dimension, kurag uses a fixed x 127). Which is closer to exact float search is not measured yet; that is part of
+  choosing the ANN index.
+- Text search over many namespaces is about twice as slow as txtai-kura's. Not profiled yet.
+
 ## Components
 
 ```mermaid

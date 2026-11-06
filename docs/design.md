@@ -205,8 +205,6 @@ first answer and stops using one that differs, since mixed models make cosine sc
 
 ## Open questions
 
-- Data migration from txtai-kura: read its `kura.db` (float16 vectors, chunks, knowledge graph) directly, or
-  export / import through the API?
 - Japanese tokenizer: keep bigrams only, or add a dictionary tokenizer (Lindera) as an option?
 - UI: port the txtai-kura graph view as is, or start read-only and smaller?
 - Embedding: keep calling an OpenAI-compatible API (LiteLLM, Ollama), or also accept vectors from the client?
