@@ -54,9 +54,16 @@ Latency includes embedding the query (vector, hybrid). On a smaller development 
 limit) text search over a tree took about twice as long as txtai-kura on the machine above; the same queries
 against both databases on one machine took the same time, so that gap was the environment, not the index.
 
-To follow up: vector results differ in 4-6 of 77 first hits. Both quantize to 8 bits, differently (faiss trains
-the range per dimension, kurag uses a fixed x 127). Which is closer to exact float search is not measured yet; that
-is part of choosing the ANN index.
+Vector results differ in 4-6 of 77 first hits. `kurag recall` (exact search over the float16 copies as the truth,
+each question embedded once) shows the difference is kurag's:
+
+| | recall@5, one namespace | top-1 exact | recall@5, over a tree | top-1 exact |
+|---|---|---|---|---|
+| txtai-kura (faiss SQ8: range trained per dimension) | 99.2 % | 100 % | 99.2 % | 98.7 % |
+| kurag v0.1.0 (fixed x 127) | 97.1 % | 94.8 % | 96.9 % | 92.2 % |
+
+The components of a 768-dimension unit vector are small (typical size 1 / sqrt(768) = 0.036), so a fixed x 127
+leaves most of the 255 levels unused. Scaling each dimension to its own range, as faiss does, is the fix to try next.
 
 ## Components
 

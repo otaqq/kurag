@@ -24,11 +24,11 @@ pub struct Config {
     pub edge_min: f32,
 }
 
-fn var(name: &str) -> Option<String> {
+pub(crate) fn var(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|v| !v.is_empty())
 }
 
-fn parsed<T: std::str::FromStr>(name: &str, default: T) -> Result<T, String> {
+pub(crate) fn parsed<T: std::str::FromStr>(name: &str, default: T) -> Result<T, String> {
     match var(name) {
         None => Ok(default),
         Some(v) => v.parse().map_err(|_| format!("{name}: cannot read {v:?}")),

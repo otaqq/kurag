@@ -6,6 +6,7 @@ mod fts;
 mod http;
 mod import;
 mod kg;
+mod recall;
 mod search;
 mod store;
 mod vectors;
@@ -25,9 +26,18 @@ async fn main() {
             }
             return;
         }
+        ["recall", questions] => {
+            let data = std::env::var("DATA_DIR").ok().filter(|v| !v.is_empty()).unwrap_or_else(|| "data".into());
+            if let Err(e) = recall::run(std::path::Path::new(questions), std::path::Path::new(&data)).await {
+                eprintln!("kurag recall: {e}");
+                std::process::exit(1);
+            }
+            return;
+        }
         _ => {
             eprintln!("usage: kurag                 run the server (settings from the environment)");
             eprintln!("       kurag import <dir>    copy txtai-kura namespaces (<dir>/<namespace>/kura.db) into DATA_DIR");
+            eprintln!("       kurag recall <tsv>    recall@5 of servers A_URL / B_URL against exact search over DATA_DIR");
             std::process::exit(2);
         }
     }
