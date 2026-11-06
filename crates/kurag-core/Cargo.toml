@@ -1,0 +1,11 @@
+[package]
+name = "kurag-core"
+version = "0.1.0"
+description = "The rules of kurag: tokenizer (words + CJK bigrams), scoring and fusion, chunk ids, API types"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+regex = "1"
+serde = { version = "1", features = ["derive"] }

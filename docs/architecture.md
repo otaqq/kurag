@@ -1,7 +1,26 @@
 # kurag — architecture (draft)
 
-How kurag is put together. Why it is built this way, and what it does, is in [design.md](design.md). Nothing here
-is built yet; parts marked *to measure* wait for numbers.
+How kurag is put together. Why it is built this way, and what it does, is in [design.md](design.md). Parts marked
+*to measure* wait for numbers; what is built so far is listed under "State".
+
+## State (v0.1.0)
+
+Built: `kurag-core` (tokenizer, scores, ids and namespaces, API types) and the `kurag` server with every API v1
+route (no UI yet). It passes the contract tests, as txtai-kura does. Differences from the plan below, for now:
+
+- **Settings from the environment only** (`LISTEN`, `DATA_DIR`, `API_KEY`, `EMBED_URL`, `EMBED_MODEL`,
+  `EMBED_API_KEY`, `EMBED_BATCH`, `EDGE_NEIGHBOURS`, `EDGE_MIN`); the TOML file comes later.
+- **No Backend trait yet.** The SQLite backend is called directly; the trait is cut out of it when a second
+  backend is written, so that it follows real code rather than a guess.
+- **Vectors: exact search over 8-bit vectors in memory** (`vectors.rs`: each component of a unit vector stored as
+  round(x * 127), loaded from the float16 copies in `kurag.db` when a namespace opens). No ANN index until
+  measurements call for one. `/rebuild` reloads them from the stored copies.
+- **One embedding URL**; no failover list or external picker yet.
+- Chunks sent again with the same text reuse their stored vectors (no embedding call); they still get a new row id,
+  so the knowledge graph treats them as to do again, as txtai-kura does.
+- Namespaces are not closed when idle.
+
+Measured (development build, after the contract tests, 12 small namespaces): 17.9 MB resident.
 
 ## Components
 
