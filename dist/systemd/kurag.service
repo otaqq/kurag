@@ -1,0 +1,24 @@
+# Example systemd unit for the kurag binary. Copy to /etc/systemd/system/, create the user and the folders, put the
+# settings in /etc/kurag/kurag.env (API_KEY, EMBED_URL, ...; docs/architecture.md, "Deployment"), then
+#   systemctl daemon-reload && systemctl enable --now kurag
+[Unit]
+Description=kurag retrieval server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=kurag
+Environment=LISTEN=127.0.0.1:9650 DATA_DIR=/var/lib/kurag
+EnvironmentFile=/etc/kurag/kurag.env
+ExecStart=/usr/local/bin/kurag
+Restart=on-failure
+# SIGTERM: kurag finishes the requests in flight and exits
+KillSignal=SIGTERM
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/kurag
+
+[Install]
+WantedBy=multi-user.target

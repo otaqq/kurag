@@ -1,0 +1,8 @@
+/target
+/data
+/out
+/ops
+.git
+*.db
+*.db-wal
+*.db-shm

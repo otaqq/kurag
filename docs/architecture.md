@@ -215,6 +215,23 @@ One TOML file, with environment variables overriding secrets:
 | `[search] hybrid_min_coverage`, `rrf_k`, `graph_min_weight` | Ranking settings, defaults from txtai-kura |
 | `[namespaces] idle_close_seconds` | When to close unused namespaces |
 
+## Deployment
+
+One static binary (`kurag`, x86-64 musl, about 8 MB), shipped two ways:
+
+- **Container image**: `docker/Dockerfile` builds it in `rust:1-alpine` and copies it onto
+  `gcr.io/distroless/static-debian12:nonroot` (no shell; runs as uid 65532; `DATA_DIR=/data`, a volume; port 9650).
+  `docker build -f docker/Dockerfile -t kurag .` from the repository root.
+- **Binary and systemd unit**: `--target bin --output type=local,dest=out` writes only the binary to `out/`;
+  `dist/systemd/kurag.service` runs it as user `kurag` with data in `/var/lib/kurag` and settings in
+  `/etc/kurag/kurag.env`.
+
+The release profile (LTO, one codegen unit, stripped) is set by environment variables in the Dockerfile, not in
+`Cargo.toml`, so that local release builds stay fast. Required settings: `API_KEY` and `EMBED_URL` (the server
+exits with a message without them). TLS to the embedding API uses the bundled Mozilla roots (webpki-roots), not the
+system store, so an embedding API behind a private CA needs plain HTTP on a trusted network for now. On SIGTERM the
+server finishes the requests in flight and exits. The release binary passes the contract tests.
+
 ## Layout
 
 Same layout as other Rust services by the same author:
@@ -229,7 +246,9 @@ ui/                   kurag-ui: the browser app (own build); its output is embed
 tests/contract/       black-box HTTP tests (run against any server with this API) and fake-embed, the
                       stand-in embedding API they need (design.md, "Contract tests")
 docs/                 design.md, architecture.md, api.md, ...
-docker/  charts/kurag/  dist/systemd/
+docker/               Dockerfile: the image, or only the binary (--target bin)
+dist/systemd/         kurag.service, an example unit for the binary
+charts/kurag/         (later) Helm chart
 ```
 
 ## Open
