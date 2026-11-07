@@ -120,6 +120,22 @@ in one workspace keeps that rule in one place.
 
 It comes after the server: txtai-kura-sync keeps working against kurag meanwhile, because the API is the same.
 
+### Plan (2026-11-07)
+
+`kurag-sync` replaces txtai-kura-sync, so that the shelf rules (sources, namespaces, chunk ids, what was sent,
+extraction) live next to the server and serve every backend alike.
+
+1. **Extraction first** (`kurag-sync extract`): the part in use today. Same command-line options and config keys
+   as `txtai-kura-sync extract` (namespace, model, API bases or a bases file re-read per batch, parallel slots,
+   minutes, limit, dry run), the same JSON schema with item limits, the same `/kg/todo` and `/kg/upsert` calls.
+   Accepted when a dry run on the same chunks asks the same prompts and a real run fills the same counts.
+2. **Sync second** (`kurag-sync run`): same `sources.toml` keys and chunking (Markdown by `## `, PDF by page through
+   `pdftotext`, EPUB by chapter, text), so chunk ids stay the same; it reads txtai-kura-sync's state files, so the
+   first run sends nothing that has not changed. Accepted when a dry run against an existing state lists no change.
+3. Then txtai-kura-sync is archived.
+
+One Rust binary with no runtime dependencies besides `pdftotext` (PDF) and `git` (git sources), like the server.
+
 ## API
 
 Version 1 is the txtai-kura API as of v0.3.5: `/health`, `/namespaces`, `/upsert`, `/delete`, `/search`
@@ -174,6 +190,33 @@ ANN (faiss) and HelixDB (HNSW). The rest stays in SQLite until an engine is used
 layer above, which no engine provides (Japanese full text, coverage scoring and fusion, chunk ids and prefix
 deletes, a knowledge graph with provenance and a work list). Measurements are in search.md, "Vector index
 backends".
+
+## Hybrid backends: txtai for vectors, HelixDB for graphs (plan, 2026-11-07)
+
+Each engine does what it measured best at; kurag keeps what neither has.
+
+| Part | Where | Why |
+|---|---|---|
+| Vector search | txtai (`VECTOR_BACKEND=txtai`) | as exact as the others, fast, small (search.md, "Vector index backends") |
+| Graphs: similarity edges and the knowledge graph | HelixDB (`GRAPH_BACKEND=helixdb`, `GRAPH_URL`) | native traversal; its vector search was slower and larger |
+| Full text | kurag (SQLite FTS5 with its own terms) | neither engine cuts Japanese |
+| Namespaces, chunk ids and prefix deletes, provenance, the extraction work list, the API, the graph view | kurag | the layer neither engine has |
+
+- **SQLite stays the truth**, as for vectors: chunks, edges and the knowledge graph are written there first, and
+  the HelixDB graph is a copy filled from it when it differs, after a failed write, and on `/rebuild`. Prefix
+  deletes, provenance and done marks keep working the same way.
+- **In HelixDB**: nodes `Chunk {ns, vid}` and `Entity {ns, name, type, description}`; edges `SIMILAR {w}` between
+  chunks, `RELATES {type, description, weight, chunk}` between entities, `MENTIONS` from chunk to entity. One
+  label set for all namespaces, keyed by `ns` (as the vector backend).
+- **What it adds**: (1) `/kg/search` walks relations in HelixDB instead of joining tables; (2) the knowledge graph
+  in `/search` (txtai-kura issue #2): entities named in the query, walked a few steps, give candidate chunks, which
+  kurag ranks by their stored vectors (exact over a few hundred) and fuses with the other lists by RRF;
+  (3) graph expansion of hits through HelixDB.
+- **A second trait**, `GraphStore` (put / remove edges, entities, relations, mentions; neighbours; walk), next to
+  `RemoteIndex`; `sqlite` stays the default, so a single machine needs neither engine.
+- **Accepted when**: the contract tests pass with `GRAPH_BACKEND=helixdb`; the eval set's recall@5 for hybrid search
+  with the knowledge graph is not lower than without; latency and memory are measured on a copy of real data, as for
+  the vector backends.
 
 ## Choosing the ANN index
 
