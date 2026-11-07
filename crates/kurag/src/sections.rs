@@ -204,7 +204,7 @@ fn term_keywords(db: &Connection, section: &str, keep: usize) -> rusqlite::Resul
     )?;
     // a file's chunks are written together, so their row ids are mostly one run: counting matches in that run is
     // what the full-text index does fast; when they are spread out, join on the ids instead (slower)
-    let in_one_run = last - first + 1 <= 2 * in_file;
+    let in_one_run = last - first < 2 * in_file;
     let mut count = db.prepare_cached("select count(*) from fts where fts match ?1")?;
     let mut count_in_file = if in_one_run {
         db.prepare_cached(

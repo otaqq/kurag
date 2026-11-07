@@ -182,10 +182,10 @@ fn collect(
                 }
                 continue;
             }
-            if name == FOLDER_CONFIG {
-                if let Some(m) = markers.as_deref_mut() {
-                    m.insert(folder.clone());
-                }
+            if name == FOLDER_CONFIG
+                && let Some(m) = markers.as_deref_mut()
+            {
+                m.insert(folder.clone());
             }
             let rel = posix(path.strip_prefix(root).unwrap_or(&path));
             if matches(&rel, include) && !matches(&rel, exclude) {
@@ -716,6 +716,11 @@ fn now() -> f64 {
         .unwrap_or(0.0)
 }
 
+/// Which namespace a file goes to (None: none).
+type NamespaceOf = Box<dyn Fn(&str) -> Option<String>>;
+/// A part waiting to be sent: key, sha256, namespace, the namespace it was in before (if sent before), its chunks.
+type Pending = (String, String, String, Option<String>, Vec<Value>);
+
 pub struct RunArgs<'a> {
     pub only: Option<&'a str>,
     pub kind: Option<&'a str>,
@@ -763,7 +768,7 @@ pub fn run(
         }
         let include = strings(src, "include", &["**/*.md"]);
         let exclude = strings(src, "exclude", &[]);
-        let (mut files, ns_of): (BTreeMap<String, PathBuf>, Box<dyn Fn(&str) -> Option<String>>) = match typ {
+        let (mut files, ns_of): (BTreeMap<String, PathBuf>, NamespaceOf) = match typ {
             "shelf" | "shelves" => {
                 let (f, map, bad) = shelf_files(src, &include, &exclude, &src_cfg.walls, None);
                 errors += bad;
@@ -837,7 +842,7 @@ pub fn run(
         let prefix = format!("{name}:");
         let label = label_of(src);
         let mut seen: HashSet<String> = HashSet::new();
-        let mut pending: Vec<(String, String, String, Option<String>, Vec<Value>)> = Vec::new(); // key, sha, ns, old ns, docs
+        let mut pending: Vec<Pending> = Vec::new();
         let before = errors;
         let mut stopped = false;
         let max_minutes = src
@@ -855,50 +860,48 @@ pub fn run(
             }
         }
 
-        let flush = |pending: &mut Vec<(String, String, String, Option<String>, Vec<Value>)>,
-                     state: &mut Map<String, Value>,
-                     errors: &mut usize|
-         -> Result<(), String> {
-            if pending.is_empty() {
-                return Ok(());
-            }
-            let result = (|| -> Result<(), Fail> {
-                let olds: HashSet<&String> = pending.iter().filter_map(|p| p.3.as_ref()).collect();
-                for ns in olds {
-                    let prefixes: Vec<String> = pending
-                        .iter()
-                        .filter(|p| p.3.as_ref() == Some(ns))
-                        .map(|p| format!("{}#", p.0))
-                        .collect();
-                    rag.delete(ns, &prefixes)?;
+        let flush =
+            |pending: &mut Vec<Pending>, state: &mut Map<String, Value>, errors: &mut usize| -> Result<(), String> {
+                if pending.is_empty() {
+                    return Ok(());
                 }
-                let news: HashSet<&String> = pending.iter().map(|p| &p.2).collect();
-                for ns in news {
-                    let docs: Vec<Value> = pending
-                        .iter()
-                        .filter(|p| &p.2 == ns)
-                        .flat_map(|p| p.4.iter().cloned())
-                        .collect();
-                    rag.upsert(ns, &docs)?;
-                }
-                Ok(())
-            })();
-            match result {
-                Ok(()) => {
-                    for (key, sha, ns, _, docs) in pending.iter() {
-                        state.insert(key.clone(), json!({"sha": sha, "namespace": ns, "chunks": docs.len()}));
+                let result = (|| -> Result<(), Fail> {
+                    let olds: HashSet<&String> = pending.iter().filter_map(|p| p.3.as_ref()).collect();
+                    for ns in olds {
+                        let prefixes: Vec<String> = pending
+                            .iter()
+                            .filter(|p| p.3.as_ref() == Some(ns))
+                            .map(|p| format!("{}#", p.0))
+                            .collect();
+                        rag.delete(ns, &prefixes)?;
                     }
-                    save_json(&paths.state_file(), state);
+                    let news: HashSet<&String> = pending.iter().map(|p| &p.2).collect();
+                    for ns in news {
+                        let docs: Vec<Value> = pending
+                            .iter()
+                            .filter(|p| &p.2 == ns)
+                            .flat_map(|p| p.4.iter().cloned())
+                            .collect();
+                        rag.upsert(ns, &docs)?;
+                    }
+                    Ok(())
+                })();
+                match result {
+                    Ok(()) => {
+                        for (key, sha, ns, _, docs) in pending.iter() {
+                            state.insert(key.clone(), json!({"sha": sha, "namespace": ns, "chunks": docs.len()}));
+                        }
+                        save_json(&paths.state_file(), state);
+                    }
+                    Err(Fail::Http(e)) => {
+                        *errors += 1;
+                        log(&format!("  failed ({} part(s)): {e}", pending.len()));
+                    }
+                    Err(Fail::Net(e)) => return Err(e),
                 }
-                Err(Fail::Http(e)) => {
-                    *errors += 1;
-                    log(&format!("  failed ({} part(s)): {e}", pending.len()));
-                }
-                Err(Fail::Net(e)) => return Err(e),
-            }
-            pending.clear();
-            Ok(())
-        };
+                pending.clear();
+                Ok(())
+            };
 
         for (rel, path) in &files {
             if deadline.is_some_and(|d| now() > d) {

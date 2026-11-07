@@ -455,6 +455,8 @@ pub struct HelixGraph {
 /// Values per Cypher list parameter, and edges per native write batch.
 const GRAPH_BATCH: usize = 2000;
 const EDGE_BATCH: usize = 500;
+/// An edge to write to HelixDB: from node id, to node id, properties.
+type EdgeRow<'a> = (i64, i64, Vec<(&'a str, Value)>);
 
 fn int(v: &Value) -> i64 {
     v.as_i64().or_else(|| v.as_f64().map(|f| f as i64)).unwrap_or(0)
@@ -520,7 +522,7 @@ impl HelixGraph {
     }
 
     /// Edges (from node id, to node id, properties) in native write batches.
-    fn add_edges_by_id(&self, label: &str, edges: &[(i64, i64, Vec<(&str, Value)>)]) -> Result<()> {
+    fn add_edges_by_id(&self, label: &str, edges: &[EdgeRow<'_>]) -> Result<()> {
         for part in edges.chunks(EDGE_BATCH) {
             let entries: Vec<Value> = part
                 .iter()
@@ -592,7 +594,7 @@ impl GraphStore for HelixGraph {
     fn add_edges(&self, ns: &str, edges: &[(i64, i64, f64)]) -> Result<()> {
         let keys: Vec<i64> = edges.iter().flat_map(|e| [e.0, e.1]).collect();
         let id = self.node_ids("KGChunk", "vid", ns, &keys)?;
-        let rows: Vec<(i64, i64, Vec<(&str, Value)>)> = edges
+        let rows: Vec<EdgeRow> = edges
             .iter()
             .filter_map(|(a, b, w)| Some((*id.get(a)?, *id.get(b)?, vec![("w", json!(w))])))
             .collect();
@@ -626,13 +628,13 @@ impl GraphStore for HelixGraph {
     fn add_relations(&self, ns: &str, relations: &[(i64, i64, String, f64, String)]) -> Result<()> {
         let keys: Vec<i64> = relations.iter().flat_map(|r| [r.0, r.1]).collect();
         let id = self.node_ids("KGEntity", "eid", ns, &keys)?;
-        let rows: Vec<(i64, i64, Vec<(&str, Value)>)> = relations
+        let rows: Vec<EdgeRow> = relations
             .iter()
             .filter_map(|(s, t, ty, w, c)| {
                 Some((
                     *id.get(s)?,
                     *id.get(t)?,
-                    vec![("type", json!(ty)), ("weight", json!(*w as f64)), ("chunk", json!(c))],
+                    vec![("type", json!(ty)), ("weight", json!(*w)), ("chunk", json!(c))],
                 ))
             })
             .collect();
@@ -689,7 +691,7 @@ impl GraphStore for HelixGraph {
     fn add_mentions(&self, ns: &str, mentions: &[(i64, i64)]) -> Result<()> {
         let chunk = self.node_ids("KGChunk", "vid", ns, &mentions.iter().map(|m| m.1).collect::<Vec<_>>())?;
         let entity = self.node_ids("KGEntity", "eid", ns, &mentions.iter().map(|m| m.0).collect::<Vec<_>>())?;
-        let rows: Vec<(i64, i64, Vec<(&str, Value)>)> = mentions
+        let rows: Vec<EdgeRow> = mentions
             .iter()
             .filter_map(|(e, v)| Some((*chunk.get(v)?, *entity.get(e)?, Vec::new())))
             .collect();

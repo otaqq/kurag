@@ -213,10 +213,10 @@ fn spaces(
 ) -> Result<Vec<Arc<Namespace>>, ApiError> {
     let mut out = Vec::new();
     for name in app.store.expand(asked, exclude) {
-        if let Some(ns) = app.store.get(&name, false)? {
-            if !with_chunks || ns.lock().count()? > 0 {
-                out.push(ns);
-            }
+        if let Some(ns) = app.store.get(&name, false)?
+            && (!with_chunks || ns.lock().count()? > 0)
+        {
+            out.push(ns);
         }
     }
     Ok(out)

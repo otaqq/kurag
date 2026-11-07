@@ -77,14 +77,7 @@ impl Parser {
     }
 
     fn starts(&self, i: usize, lit: &str) -> bool {
-        let mut k = i;
-        for c in lit.chars() {
-            if self.at(k) != Some(c) {
-                return false;
-            }
-            k += 1;
-        }
-        true
+        (i..).zip(lit.chars()).all(|(k, c)| self.at(k) == Some(c))
     }
 
     fn find(&self, c: char, from: usize) -> Option<usize> {
@@ -109,10 +102,10 @@ impl Parser {
                         None => {
                             // text at the end: kept unless a reference may be cut in half
                             let from = i.max(n.saturating_sub(34));
-                            if let Some(amp) = (from..n).rev().find(|&k| self.s[k] == '&') {
-                                if !(amp..n).any(|k| matches!(self.s[k], '\t' | '\n' | '\r' | '\u{c}' | ' ' | ';')) {
-                                    break;
-                                }
+                            if let Some(amp) = (from..n).rev().find(|&k| self.s[k] == '&')
+                                && !(amp..n).any(|k| matches!(self.s[k], '\t' | '\n' | '\r' | '\u{c}' | ' ' | ';'))
+                            {
+                                break;
                             }
                             j = n;
                         }

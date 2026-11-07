@@ -41,7 +41,7 @@ fn load(store: &Store, name: &str) -> Result<Option<Exact>, String> {
         let b: Vec<u8> = r.get(1).map_err(|e| e.to_string())?;
         dims = b.len() / 2;
         vids.push(r.get(0).map_err(|e| e.to_string())?);
-        data.extend(b.chunks_exact(2).map(|c| f16::from_le_bytes([c[0], c[1]])));
+        data.extend(b.as_chunks::<2>().0.iter().map(|c| f16::from_le_bytes(*c)));
     }
     Ok(Some(Exact { vids, data, dims }))
 }

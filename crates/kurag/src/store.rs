@@ -76,9 +76,16 @@ fn to_f16_bytes(v: &[f32]) -> Vec<u8> {
     v.iter().flat_map(|&x| f16::from_f32(x).to_le_bytes()).collect()
 }
 
+/// A stored relation: source, target, type, weight, the chunk it was found in.
+type RelationRow = (i64, i64, String, f64, String);
+/// Similarity edges by (chunk, chunk).
+type EdgeWeights = HashMap<(i64, i64), f64>;
+
 fn from_f16_bytes(b: &[u8]) -> Vec<f32> {
-    b.chunks_exact(2)
-        .map(|c| f16::from_le_bytes([c[0], c[1]]).to_f32())
+    b.as_chunks::<2>()
+        .0
+        .iter()
+        .map(|c| f16::from_le_bytes(*c).to_f32())
         .collect()
 }
 
@@ -250,7 +257,7 @@ impl Inner {
             .query_map([], |r| r.get(0))?
             .collect::<rusqlite::Result<_>>()?;
         graph.add_entities(&ns, &eids).map_err(fail)?;
-        let relations: Vec<(i64, i64, String, f64, String)> = self
+        let relations: Vec<RelationRow> = self
             .db
             .prepare("select source, target, type, weight, chunk from relations")?
             .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?
@@ -423,7 +430,7 @@ impl Inner {
         sources: &[i64],
         targets: &[i64],
         chunks: &[String],
-    ) -> Result<Vec<(i64, i64, String, f64, String)>> {
+    ) -> Result<Vec<RelationRow>> {
         let sql = format!(
             "select source, target, type, weight, chunk from relations where source in ({}) and target in ({}) and chunk in ({})",
             kg::marks(sources.len()),
@@ -712,7 +719,7 @@ impl Inner {
         vectors: &[Vec<f32>],
         neighbours: usize,
         edge_min: f32,
-    ) -> Result<(Vec<i64>, HashMap<(i64, i64), f64>)> {
+    ) -> Result<(Vec<i64>, EdgeWeights)> {
         remote.remove(&self.name, old).map_err(Error::Backend)?;
         let mut vids = Vec::with_capacity(docs.len());
         {

@@ -216,10 +216,12 @@ pub struct Around {
 /// One step of a walk over the relations: (source, target, type, highest weight) touching these entities, the
 /// heaviest first (then by source, target, type), at most `limit`. Given by the namespace's tables
 /// (`relations_around`) or by a graph backend.
-pub type Step<'a> = &'a dyn Fn(&[i64], usize) -> Result<Vec<(i64, i64, String, f64)>, String>;
+/// A relation as walked: source, target, type, weight.
+pub type Relation = (i64, i64, String, f64);
+pub type Step<'a> = &'a dyn Fn(&[i64], usize) -> Result<Vec<Relation>, String>;
 
 /// `Step` over the namespace's own tables.
-pub fn relations_around(db: &Connection, eids: &[i64], limit: usize) -> rusqlite::Result<Vec<(i64, i64, String, f64)>> {
+pub fn relations_around(db: &Connection, eids: &[i64], limit: usize) -> rusqlite::Result<Vec<Relation>> {
     if eids.is_empty() {
         return Ok(Vec::new());
     }
@@ -240,15 +242,10 @@ pub fn relations_around(db: &Connection, eids: &[i64], limit: usize) -> rusqlite
 
 /// Entities reached from `eids` within `depth` steps (the start ones first), at most `limit`; and the relations
 /// walked, in the order they were reached.
-pub fn walk(
-    eids: &[i64],
-    depth: usize,
-    limit: usize,
-    step: Step,
-) -> Result<(Vec<i64>, Vec<(i64, i64, String, f64)>), String> {
+pub fn walk(eids: &[i64], depth: usize, limit: usize, step: Step) -> Result<(Vec<i64>, Vec<Relation>), String> {
     let mut seen: Vec<i64> = eids.to_vec();
     let mut frontier: Vec<i64> = eids.to_vec();
-    let mut rels: Vec<(i64, i64, String, f64)> = Vec::new();
+    let mut rels: Vec<Relation> = Vec::new();
     let mut index: HashMap<(i64, i64, String), usize> = HashMap::new();
     for _ in 0..depth {
         if frontier.is_empty() {
