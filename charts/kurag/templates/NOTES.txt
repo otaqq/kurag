@@ -1,0 +1,11 @@
+kurag {{ .Values.image.tag | default .Chart.AppVersion }} runs as one Pod (vector index: {{ .Values.vector.backend }}{{ if include "kurag.txtaiSidecar" . }}, kurag-txtai next to it{{ end }}; graphs: {{ .Values.graph.backend }}).
+
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "kurag.fullname" . }} {{ .Values.service.port }}
+  curl -s localhost:{{ .Values.service.port }}/health
+  curl -s localhost:{{ .Values.service.port }}/namespaces -H "X-API-Key: <the key in {{ .Values.apiKey.existingSecret }}>"
+
+Fill it with kurag-sync (README.md, "kurag-sync"), pointing [rag] url at the service.
+{{- if not .Values.persistence.enabled }}
+
+Note: persistence is off; the indexes are lost when the Pod restarts.
+{{- end }}

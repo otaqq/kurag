@@ -24,6 +24,11 @@ async fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.iter().map(String::as_str).collect::<Vec<_>>()[..] {
         [] => {}
+        ["--version" | "version"] => {
+            println!("kurag {}", env!("CARGO_PKG_VERSION"));
+            return;
+        }
+        ["health"] => std::process::exit(health()),
         ["import", src] => {
             let data = std::env::var("DATA_DIR")
                 .ok()
@@ -48,6 +53,8 @@ async fn main() {
         }
         _ => {
             eprintln!("usage: kurag                 run the server (settings from the environment)");
+            eprintln!("       kurag health          ask the server on LISTEN for /health (exit 0 when it answers 200)");
+            eprintln!("       kurag --version");
             eprintln!(
                 "       kurag import <dir>    copy txtai-kura namespaces (<dir>/<namespace>/kura.db) into DATA_DIR"
             );
@@ -123,4 +130,36 @@ async fn main() {
         })
         .await
         .expect("serve");
+}
+
+/// `kurag health`: GET /health from the server on this machine (the port of LISTEN), for container health checks
+/// (the image has no shell or curl). 0 when it answers 200.
+fn health() -> i32 {
+    use std::io::{Read, Write};
+    let listen = std::env::var("LISTEN")
+        .ok()
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "0.0.0.0:9650".into());
+    let port = listen.rsplit(':').next().unwrap_or("9650");
+    let timeout = std::time::Duration::from_secs(5);
+    let ask = || -> std::io::Result<String> {
+        let addr = format!("127.0.0.1:{port}").parse().map_err(std::io::Error::other)?;
+        let mut s = std::net::TcpStream::connect_timeout(&addr, timeout)?;
+        s.set_read_timeout(Some(timeout))?;
+        s.write_all(b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")?;
+        let mut head = [0u8; 32];
+        let n = s.read(&mut head)?;
+        Ok(String::from_utf8_lossy(&head[..n]).into_owned())
+    };
+    match ask() {
+        Ok(h) if h.split_whitespace().nth(1) == Some("200") => 0,
+        Ok(h) => {
+            eprintln!("kurag health: {}", h.lines().next().unwrap_or(""));
+            1
+        }
+        Err(e) => {
+            eprintln!("kurag health: {e}");
+            1
+        }
+    }
 }

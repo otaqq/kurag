@@ -1,0 +1,11 @@
+# Runs kurag-sync.service every hour; each source's own schedule (sources.toml) decides whether it is sent.
+[Unit]
+Description=Run kurag-sync every hour
+
+[Timer]
+OnCalendar=*-*-* *:15:00
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

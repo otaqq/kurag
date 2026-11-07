@@ -235,24 +235,44 @@ One TOML file, with environment variables overriding secrets:
 
 ## Deployment
 
-One static binary (`kurag`, x86-64 musl, about 8 MB), shipped two ways:
+Two static binaries (`kurag` and `kurag-sync`, musl, x86_64 and aarch64), shipped as images, a Helm chart and
+archives with systemd units. Each tag `v<version>` publishes them (`.github/workflows/release.yml`):
 
-- **Container image**: `docker/Dockerfile` builds it in `rust:1-alpine` and copies it onto
-  `gcr.io/distroless/static-debian12:nonroot` (no shell; runs as uid 65532; `DATA_DIR=/data`, a volume; port 9650).
-  `docker build -f docker/Dockerfile -t kurag .` from the repository root.
-- **Binary and systemd unit**: `--target bin --output type=local,dest=out` writes only the binary to `out/`;
-  `dist/systemd/kurag.service` runs it as user `kurag` with data in `/var/lib/kurag` and settings in
-  `/etc/kurag/kurag.env`.
+| What | Where |
+|---|---|
+| Image: server and client (distroless, nonroot, uid 65532, `/data` a volume, port 9650, a health check that runs `kurag health`) | `ghcr.io/otaqq/kurag:<version>` |
+| Image: kurag-txtai, txtai's ANN behind a small HTTP API (`backends/txtai`, port 9670) | `ghcr.io/otaqq/kurag-txtai:<version>` |
+| Helm chart | `oci://ghcr.io/otaqq/charts/kurag` |
+| Binaries with `LICENSE`, `NOTICE`, `README.md` and `dist/systemd/*`, plus `SHA256SUMS` | GitHub Releases |
 
-With `VECTOR_BACKEND=txtai`, run `backends/txtai` next to it (`docker build -t kurag-txtai backends/txtai`, port
-9670, its indexes in its own `DATA_DIR`); with `helixdb`, a HelixDB server (`ghcr.io/helixdb/helixdb`, port 8080,
-`HELIX_DATA_DIR` on a volume). `VECTOR_URL` points kurag at either.
+- **Docker Compose** (`docker/compose.yaml`): kurag with a named volume; `--profile txtai` adds kurag-txtai and
+  `--profile helixdb` the official HelixDB image (`ghcr.io/helixdb/helixdb`, port 8080, data in `/var/lib/helix`);
+  the backend is still chosen by `VECTOR_BACKEND` / `GRAPH_BACKEND` and their URLs. `KURAG_API_KEY` and
+  `EMBED_URL` are required. `--build` builds from source instead of pulling.
+- **Kubernetes** (`charts/kurag`): one Pod with the Recreate strategy (each namespace is a SQLite database written by
+  one process), a PersistentVolumeClaim for `/data` (kept on uninstall), the API key from a Secret you create
+  (required), and optionally the graph view's login from another Secret. With `vector.backend: txtai` and no URL,
+  kurag-txtai runs next to kurag in the same Pod (its indexes in `/data/txtai`, reached on 127.0.0.1); HelixDB is
+  given by URL. The chart refuses to render without the API key Secret and the embedding URL.
+- **systemd** (`dist/systemd/`): `kurag.service` runs the server as user `kurag` with data in `/var/lib/kurag` and
+  settings in `/etc/kurag/kurag.env`; `kurag-sync.service` with `kurag-sync.timer` runs `kurag-sync run --due`
+  every hour at :15 (sources in `/etc/kurag-sync/`, state in `/var/lib/kurag-sync`).
+- **From source**: `docker build -f docker/Dockerfile .` (the default target builds both binaries in
+  `rust:1-alpine`); `--target bin --output type=local,dest=out` writes only the binaries. The build caches cargo's
+  registry and target folder, so a rebuild after a small change takes seconds.
 
 The release profile (LTO, one codegen unit, stripped) is set by environment variables in the Dockerfile, not in
 `Cargo.toml`, so that local release builds stay fast. Required settings: `API_KEY` and `EMBED_URL` (the server
 exits with a message without them). TLS to the embedding API uses the bundled Mozilla roots (webpki-roots), not the
 system store, so an embedding API behind a private CA needs plain HTTP on a trusted network for now. On SIGTERM the
-server finishes the requests in flight and exits. The release binary passes the contract tests.
+server finishes the requests in flight and exits.
+
+**CI** (`.github/workflows/`): `ci.yml` runs `cargo fmt --check`, `clippy -D warnings` and the unit tests; the
+contract tests against a freshly built server with fake-embed as its embedding API; both images; the chart (lint,
+render with every option on, kubeconform, and its version against `crates/kurag/Cargo.toml`); and tests and the
+image natively on arm64 (GitHub only). `security.yml` scans both images and the repository with Trivy and the
+lock file with cargo-audit, weekly and on every push (on GitHub as code-scanning results; on other forges as an
+issue). The same workflows run on Forgejo Actions; the jobs that need GitHub (arm64 runners, ghcr.io) skip there.
 
 ## Sync client
 
@@ -323,10 +343,11 @@ ui/                   kurag-ui: the graph view, plain files built into the serve
 tests/contract/       black-box HTTP tests (run against any server with this API) and fake-embed, the
                       stand-in embedding API they need (design.md, "Contract tests")
 docs/                 design.md, architecture.md, api.md, ...
-docker/               Dockerfile: the image, or only the binary (--target bin)
+docker/               Dockerfile (the image, or only the binaries: --target bin) and compose.yaml
 backends/txtai/       kurag-txtai: txtai's ANN behind a small HTTP API (VECTOR_BACKEND=txtai), own Dockerfile
-dist/systemd/         kurag.service, an example unit for the binary
-charts/kurag/         (later) Helm chart
+dist/systemd/         kurag.service, kurag-sync.service and .timer: example units for the binaries
+charts/kurag/         Helm chart
+.github/workflows/    ci, release, security
 ```
 
 ## Open

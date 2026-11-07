@@ -1,0 +1,20 @@
+# Example systemd unit for kurag-sync: sends the sources whose schedule has come (cron / every in sources.toml) to a
+# kurag server. Run by kurag-sync.timer every hour. Copy both to /etc/systemd/system/, put sources.toml (and
+# sources.local.toml, .env with RAG_API_KEY) in /etc/kurag-sync/, create the user, then
+#   systemctl daemon-reload && systemctl enable --now kurag-sync.timer
+# One run at a time: a second one waits for the first (state/lock), so a long run never overlaps the next hour's.
+[Unit]
+Description=kurag-sync: send changed documents to kurag
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=kurag
+ExecStart=/usr/local/bin/kurag-sync --config /etc/kurag-sync/sources.toml --data /var/lib/kurag-sync run --due
+# PDFs are read with pdftotext (poppler-utils), git sources with git
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ReadWritePaths=/var/lib/kurag-sync

@@ -95,6 +95,10 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--limit" => a.limit = Some(number(value()?)? as usize),
             "--dry-run" => a.dry_run = true,
             "-h" | "--help" => return Err(String::new()),
+            "-V" | "--version" => {
+                println!("kurag-sync {}", env!("CARGO_PKG_VERSION"));
+                std::process::exit(0);
+            }
             cmd if !cmd.starts_with('-') && a.command.is_none() => a.command = Some(cmd.to_string()),
             other => return Err(format!("unknown argument {other}")),
         }
@@ -177,11 +181,11 @@ fn sync_command(cmd: &str, a: Args) -> i32 {
             return 2;
         }
     };
-    if let Some(src) = a.source.as_deref() {
-        if s.sources.disabled.iter().any(|d| d == src) {
-            log(&format!("{src}: enabled = false; nothing to do"));
-            return 0;
-        }
+    if let Some(src) = a.source.as_deref()
+        && s.sources.disabled.iter().any(|d| d == src)
+    {
+        log(&format!("{src}: enabled = false; nothing to do"));
+        return 0;
     }
     if let Err(e) = std::fs::create_dir_all(&s.paths.state) {
         log(&format!("error: {}: {e}", s.paths.state.display()));

@@ -1,0 +1,119 @@
+name: security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  TRIVY_VERSION: 0.76.0
+  CARGO_AUDIT_VERSION: 0.22.2
+  # cargo-audit releases publish no checksum file: this is the SHA-256 of the x86_64 musl archive of that version
+  CARGO_AUDIT_SHA256: 7fb9497f8594b389e5fce5ef9b92db08432996895b2e0c5a0167a69ed445c428
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      issues: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Trivy and cargo-audit
+        run: |
+          cd "$RUNNER_TEMP"
+          mkdir -p bin
+          base=https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}
+          f=trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz
+          curl -fsSLO "$base/$f" -O "$base/trivy_${TRIVY_VERSION}_checksums.txt"
+          grep " $f\$" "trivy_${TRIVY_VERSION}_checksums.txt" | sha256sum -c -
+          tar -xzf "$f" -C bin trivy
+          d=cargo-audit-x86_64-unknown-linux-musl-v${CARGO_AUDIT_VERSION}
+          curl -fsSLO "https://github.com/rustsec/rustsec/releases/download/cargo-audit/v${CARGO_AUDIT_VERSION}/$d.tgz"
+          echo "${CARGO_AUDIT_SHA256}  $d.tgz" | sha256sum -c -
+          tar -xzf "$d.tgz" --strip-components=1 -C bin "$d/cargo-audit"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - run: docker build -f docker/Dockerfile --target production -t kurag:scan .
+      - run: docker build -t kurag-txtai:scan backends/txtai
+
+      - name: Scan (SARIF)
+        if: github.server_url == 'https://github.com'
+        run: |
+          mkdir -p sarif
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed --quiet --format sarif -o sarif/trivy-image.sarif kurag:scan
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed --quiet --format sarif -o sarif/trivy-txtai.sarif kurag-txtai:scan
+          trivy fs --severity HIGH,CRITICAL --ignore-unfixed --quiet --scanners vuln,misconfig,secret --skip-dirs sarif --format sarif -o sarif/trivy-repo.sarif .
+      - if: github.server_url == 'https://github.com'
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: sarif/trivy-image.sarif
+          category: trivy-image
+      - if: github.server_url == 'https://github.com'
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: sarif/trivy-txtai.sarif
+          category: trivy-txtai
+      - if: github.server_url == 'https://github.com'
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: sarif/trivy-repo.sarif
+          category: trivy-repo
+      # cargo-audit has no SARIF output: on GitHub it fails the job instead (after the uploads above)
+      - name: cargo audit
+        if: github.server_url == 'https://github.com'
+        run: cargo-audit audit --file Cargo.lock
+
+      - name: Scan (report)
+        if: github.server_url != 'https://github.com'
+        run: |
+          mkdir -p report
+          s=0
+          cargo-audit audit --file Cargo.lock > report/cargo-audit.txt 2>&1 || s=1
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed --quiet --exit-code 1 -o report/trivy-image.txt kurag:scan || s=1
+          trivy image --severity HIGH,CRITICAL --ignore-unfixed --quiet --exit-code 1 -o report/trivy-txtai.txt kurag-txtai:scan || s=1
+          trivy fs --severity HIGH,CRITICAL --ignore-unfixed --quiet --scanners vuln,misconfig,secret --skip-dirs report --exit-code 1 -o report/trivy-repo.txt . || s=1
+          echo "found=$s" >> "$GITHUB_ENV"
+      - name: Report as an issue
+        if: github.server_url != 'https://github.com'
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_number }}
+        run: |
+          node <<'EOF'
+          const fs = require("fs");
+          const api = `${process.env.GITHUB_SERVER_URL}/api/v1/repos/${process.env.GITHUB_REPOSITORY}`;
+          const headers = { Authorization: `token ${process.env.TOKEN}`, "Content-Type": "application/json" };
+          const call = async (method, path, body) => {
+            const r = await fetch(api + path, { method, headers, body: body && JSON.stringify(body) });
+            if (!r.ok) throw new Error(`${method} ${path}: ${r.status} ${await r.text()}`);
+            return r.status === 204 ? null : r.json();
+          };
+          const title = "Security scan: vulnerabilities found";
+          const found = process.env.found === "1";
+          (async () => {
+            const open = (await call("GET", "/issues?state=open&type=issues&limit=50")).find((i) => i.title === title);
+            if (found) {
+              const section = (name, file) =>
+                `### ${name}\n\n\`\`\`\n${fs.readFileSync(`report/${file}`, "utf8").slice(0, 20000)}\n\`\`\`\n`;
+              const body = [
+                `Run: ${process.env.RUN_URL}`,
+                section("cargo audit", "cargo-audit.txt"),
+                section("Trivy: image", "trivy-image.txt"),
+                section("Trivy: kurag-txtai image", "trivy-txtai.txt"),
+                section("Trivy: repository", "trivy-repo.txt"),
+              ].join("\n");
+              if (open) await call("PATCH", `/issues/${open.number}`, { body });
+              else await call("POST", "/issues", { title, body });
+            } else if (open) {
+              await call("POST", `/issues/${open.number}/comments`, { body: `Clean as of ${process.env.RUN_URL}` });
+              await call("PATCH", `/issues/${open.number}`, { state: "closed" });
+            }
+          })().catch((e) => { console.error(e.message); process.exit(1); });
+          EOF

@@ -205,8 +205,23 @@ questions about them; it does not extract.
 With `kg: n` (hybrid only, n up to 3) a search adds a third list to the fusion: the entities named in the query
 (found as in `/kg/search`: same name first, then full text on names and descriptions; at most 10), walked n steps
 along their relations, give the chunks that mention the entities reached, ranked by cosine similarity to the
-query. A chunk the graph reaches gains one more RRF term; a chunk it does not reach keeps its score. Whether this
-finds better answers is not measured yet: that needs questions whose answer spans several documents.
+query. A chunk the graph reaches gains one more RRF term; a chunk it does not reach keeps its score.
+
+Measured (v0.4.0) on questions whose answer needs two chunks of different documents: pairs of chunks sharing a rare
+term were picked without the knowledge graph (picking them by the graph would favour it), an LLM of another family
+than the extractor wrote one question per pair, and a second look kept only questions neither chunk answers alone.
+Search only (hybrid, limit 5, graph 2), against the two source chunks, kg 0 / 1 / 2:
+
+| Set | Questions | Both chunks found | Recall |
+|---|---|---|---|
+| technical notes, dev | 9 | 0.44 / 0.22 / 0.33 | 0.72 / 0.61 / 0.67 |
+| technical notes, test | 9 | 0.56 / 0.56 / 0.56 | 0.78 / 0.78 / 0.78 |
+| books on Kubernetes, dev | 15 | 0.27 / 0.27 / 0.27 | 0.63 / 0.57 / 0.57 |
+| books on Kubernetes, test | 15 | 0.20 / 0.20 / 0.20 | 0.47 / 0.50 / 0.50 |
+
+The knowledge graph did not find more of the second chunk, and on the dev sets it pushed found chunks out of the
+results (the reached chunks take places in the fused list; why exactly is not checked). The sets are small (one
+question is 7 to 11 points), so this says "no gain seen", not "harmful". `kg` stays off by default.
 
 ## Graph backends: SQLite and HelixDB
 

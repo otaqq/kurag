@@ -1,0 +1,158 @@
+name: release
+
+# On a version tag (v1.2.3, v1.2.3-rc.1): static musl binaries (kurag, kurag-sync) for x86_64 and aarch64, a
+# multi-arch image on ghcr.io holding the same binaries, the kurag-txtai image, the Helm chart on ghcr.io, and a GitHub
+# Release with the archives and SHA256SUMS.
+# GitHub only.
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+
+jobs:
+  binaries:
+    if: github.server_url == 'https://github.com'
+    strategy:
+      matrix:
+        include:
+          - { runner: ubuntu-latest, arch: amd64, triple: x86_64-unknown-linux-musl }
+          - { runner: ubuntu-24.04-arm, arch: arm64, triple: aarch64-unknown-linux-musl }
+    # Outside GitHub the job may be skipped by its `if` only once a runner has taken it: ask for a common label there
+    runs-on: ${{ github.server_url == 'https://github.com' && matrix.runner || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: The tag matches the version in Cargo.toml
+        run: |
+          v=$(sed -n 's/^version = "\(.*\)"$/\1/p' crates/kurag/Cargo.toml | head -n 1)
+          test "v$v" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME, Cargo.toml $v" >&2; exit 1; }
+      # The same Alpine stage that builds the production image: tests, then the static release binary
+      - run: docker build -f docker/Dockerfile --target builder -t kurag:builder .
+      - run: docker run --rm kurag:builder cargo test --workspace --locked
+      - name: Binaries and archive
+        run: |
+          mkdir -p bin/${{ matrix.arch }}
+          id=$(docker create kurag:builder)
+          for b in kurag kurag-sync; do docker cp "$id:/usr/local/bin/$b" bin/${{ matrix.arch }}/$b; done
+          docker rm "$id"
+          file bin/${{ matrix.arch }}/kurag
+          bin/${{ matrix.arch }}/kurag --version
+          bin/${{ matrix.arch }}/kurag-sync --version
+          n=kurag-${GITHUB_REF_NAME}-${{ matrix.triple }}
+          mkdir "$n"
+          cp bin/${{ matrix.arch }}/kurag bin/${{ matrix.arch }}/kurag-sync LICENSE NOTICE README.md dist/systemd/* "$n/"
+          tar -czf "$n.tar.gz" "$n"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: binaries-${{ matrix.arch }}
+          path: |
+            bin/
+            kurag-*.tar.gz
+          if-no-files-found: error
+
+  image:
+    if: github.server_url == 'https://github.com'
+    needs: binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: binaries-*
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository }}
+          flavor: latest=false
+          # 1.2 and latest follow releases only; a pre-release gets only its own version
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: release
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: mode=max
+          sbom: true
+      # kurag-txtai (backends/txtai, Python): wheels only, so building arm64 under emulation is quick
+      - uses: docker/setup-qemu-action@v4
+      - id: meta-txtai
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository }}-txtai
+          flavor: latest=false
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+      - uses: docker/build-push-action@v7
+        with:
+          context: backends/txtai
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta-txtai.outputs.tags }}
+          labels: ${{ steps.meta-txtai.outputs.labels }}
+          provenance: mode=max
+          sbom: true
+
+  # The Helm chart as an OCI artifact: oci://ghcr.io/<owner>/charts/kurag, the same version as the image
+  chart:
+    if: github.server_url == 'https://github.com'
+    needs: image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v4
+      - name: The chart matches the tag
+        run: |
+          v=${GITHUB_REF_NAME#v}
+          grep -qx "version: $v" charts/kurag/Chart.yaml
+          grep -qx "appVersion: \"$v\"" charts/kurag/Chart.yaml
+      - name: Package and push
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$TOKEN" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+          helm package charts/kurag
+          helm push kurag-${GITHUB_REF_NAME#v}.tgz "oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/charts"
+
+  release:
+    if: github.server_url == 'https://github.com'
+    needs: [binaries, image, chart]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: binaries-*
+          merge-multiple: true
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          sha256sum kurag-*.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+          pre=; case "$GITHUB_REF_NAME" in *-*) pre=--prerelease ;; esac
+          gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --verify-tag --generate-notes $pre \
+            kurag-*.tar.gz SHA256SUMS

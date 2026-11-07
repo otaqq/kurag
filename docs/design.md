@@ -168,7 +168,8 @@ How they run (`tests/contract/`, crate `kurag-contract`):
 - The tests read `KURAG_URL` and `KURAG_API_KEY`, and skip with a note when `KURAG_URL` is not set.
 - Each test writes under its own root namespace (`ct<run>-<test>`) and searches only there, and leaves its data
   behind: point them at a disposable server.
-- `cargo test -p kurag-contract`. All 11 pass against txtai-kura v0.3.5.
+- `cargo test -p kurag-contract`. The first 11 passed against txtai-kura v0.3.5; 12 (with the knowledge graph in
+  search) pass against kurag, also in CI (`.github/workflows/ci.yml`).
 
 ## Backend trait
 
@@ -194,7 +195,7 @@ layer above, which no engine provides (Japanese full text, coverage scoring and 
 deletes, a knowledge graph with provenance and a work list). Measurements are in search.md, "Vector index
 backends".
 
-## Hybrid backends: txtai for vectors, HelixDB for graphs (plan, 2026-11-07)
+## Hybrid backends: txtai for vectors, HelixDB for graphs (tried, 2026-11-07)
 
 Each engine does what it measured best at; kurag keeps what neither has.
 
@@ -212,17 +213,20 @@ Each engine does what it measured best at; kurag keeps what neither has.
   chunks, `RELATES {type, description, weight, chunk}` between entities, `MENTIONS` from chunk to entity. One
   label set for all namespaces, keyed by `ns` (as the vector backend).
 - **What it adds**: (1) `/kg/search` walks relations in HelixDB instead of joining tables; (2) the knowledge graph
-  in `/search` (txtai-kura issue #2): entities named in the query, walked a few steps, give candidate chunks, which
+  in `/search`: entities named in the query, walked a few steps, give candidate chunks, which
   kurag ranks by their stored vectors (exact over a few hundred) and fuses with the other lists by RRF;
   (3) graph expansion of hits through HelixDB.
 - **A second trait**, `GraphStore` (put / remove edges, entities, relations, mentions; neighbours; walk), next to
   `RemoteIndex`; `sqlite` stays the default, so a single machine needs neither engine.
-- **Built (kurag #1, first part)**: the trait, HelixDB as graph backend, `kg` in hybrid search. Contract tests pass
-  with both; on a copy of real data HelixDB gives the same answers, more slowly (search.md, "Graph backends").
-  Still open: the eval questions that span documents, and filling and memory at production size.
-- **Accepted when**: the contract tests pass with `GRAPH_BACKEND=helixdb`; the eval set's recall@5 for hybrid search
-  with the knowledge graph is not lower than without; latency and memory are measured on a copy of real data, as for
-  the vector backends.
+- **Built** (v0.4.0): the trait, HelixDB as graph backend, `kg` in hybrid search. Contract tests pass with both.
+- **Outcome**: on a copy of real data HelixDB gave the same answers more slowly, also on a local SSD (the time is
+  its per-query work; search.md, "Graph backends"), so graphs stay in SQLite by default and HelixDB stays selectable
+  (`GRAPH_BACKEND=helixdb`) for graphs that outgrow one process. Filling and memory at several million edges are
+  not measured. `kg` in search found no more answers on questions that span documents (search.md, "Knowledge
+  graph in search"), so it stays off by default; per-function backend choice waits for a measured gain.
+- **Accepted when**: the contract tests pass with `GRAPH_BACKEND=helixdb` (yes); recall for hybrid search with the
+  knowledge graph is not lower than without (not met on the first, small sets); latency and memory are measured on
+  a copy of real data, as for the vector backends (yes, at about 50,000 chunks).
 
 ## Choosing the ANN index
 
@@ -255,8 +259,8 @@ first answer and stops using one that differs, since mixed models make cosine sc
 
 ## Later
 
-- **Knowledge graph in `/search`** (txtai-kura #2), and graph-prefiltered search (traverse, then rank only the
-  chunks reached).
+- **Graph-prefiltered search** (traverse, then rank only the chunks reached). The knowledge graph as a third list in
+  `/search` is built (`kg`, v0.4.0) and measured (search.md).
 - **Agent memory**: users, sessions, memories with provenance, deduplication, correction, decay and expiry. Its
   own design note; the storage parts reuse the backend trait.
 - **More backends** only when a measured need appears (size, or a feature such as native graph traversal).

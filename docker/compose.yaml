@@ -1,0 +1,63 @@
+# kurag with Docker Compose. From the repository root:
+#   KURAG_API_KEY=... EMBED_URL=http://host.docker.internal:11434/v1 EMBED_MODEL=embeddinggemma \
+#     docker compose -f docker/compose.yaml up -d
+# (or put those variables in docker/.env). This runs the published images (KURAG_VERSION, default latest;
+# `docker compose pull` to update). To build from source instead: add --build.
+#
+# Optional engines (README.md, "Settings"), each a profile:
+#   txtai:   vector index in txtai's ANN (faiss)  -> --profile txtai   and VECTOR_BACKEND=txtai
+#   helixdb: vector index or graphs in HelixDB    -> --profile helixdb and VECTOR_BACKEND=helixdb or GRAPH_BACKEND=helixdb
+# Without them, kurag keeps everything in its own data folder (SQLite and an in-memory vector index).
+name: kurag
+
+services:
+  kurag:
+    image: ghcr.io/otaqq/kurag:${KURAG_VERSION:-latest}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: production
+    ports:
+      - "${KURAG_PORT:-9650}:9650"
+    environment:
+      API_KEY: ${KURAG_API_KEY:?set KURAG_API_KEY (clients send it as X-API-Key)}
+      EMBED_URL: ${EMBED_URL:?set EMBED_URL (an OpenAI-compatible embeddings API, e.g. http://host.docker.internal:11434/v1)}
+      EMBED_MODEL: ${EMBED_MODEL:-}
+      EMBED_API_KEY: ${EMBED_API_KEY:-}
+      VECTOR_BACKEND: ${VECTOR_BACKEND:-memory}
+      # the service of the chosen profile: http://txtai:9670 or http://helixdb:8080
+      VECTOR_URL: ${VECTOR_URL:-}
+      GRAPH_BACKEND: ${GRAPH_BACKEND:-sqlite}
+      GRAPH_URL: ${GRAPH_URL:-}
+      UI_USER: ${KURAG_UI_USER:-}
+      UI_PASSWORD: ${KURAG_UI_PASSWORD:-}
+    volumes:
+      - kurag-data:/data
+    restart: unless-stopped
+    # An embedding API on the Docker host: http://host.docker.internal:<port>
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  txtai:
+    profiles: [txtai]
+    image: ghcr.io/otaqq/kurag-txtai:${KURAG_VERSION:-latest}
+    build:
+      context: ../backends/txtai
+    volumes:
+      - txtai-data:/data
+    restart: unless-stopped
+    # no published port: only kurag reaches it, on the compose network
+
+  helixdb:
+    profiles: [helixdb]
+    image: ghcr.io/helixdb/helixdb:${HELIXDB_VERSION:-v0.0.13}
+    environment:
+      HELIX_DATA_DIR: /var/lib/helix
+    volumes:
+      - helixdb-data:/var/lib/helix
+    restart: unless-stopped
+
+volumes:
+  kurag-data:
+  txtai-data:
+  helixdb-data:

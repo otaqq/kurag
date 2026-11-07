@@ -1,0 +1,156 @@
+{{- if not .Values.apiKey.existingSecret }}
+{{- fail "apiKey.existingSecret is required: create a Secret with the API key (see values.yaml)" }}
+{{- end }}
+{{- if not .Values.embed.url }}
+{{- fail "embed.url is required: an OpenAI-compatible embeddings API" }}
+{{- end }}
+{{- if and (eq .Values.vector.backend "helixdb") (not .Values.vector.url) }}
+{{- fail "vector.backend helixdb needs vector.url" }}
+{{- end }}
+{{- if and (eq .Values.graph.backend "helixdb") (not .Values.graph.url) }}
+{{- fail "graph.backend helixdb needs graph.url" }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kurag.fullname" . }}
+  labels:
+    {{- include "kurag.labels" . | nindent 4 }}
+spec:
+  # One Pod only: each namespace is a SQLite database written by one process (see values.yaml)
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "kurag.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "kurag.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: kurag
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.apiKey.existingSecret }}
+                  key: {{ .Values.apiKey.secretKey }}
+            - name: EMBED_URL
+              value: {{ .Values.embed.url | quote }}
+            {{- with .Values.embed.model }}
+            - name: EMBED_MODEL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.embed.existingSecret }}
+            - name: EMBED_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: {{ $.Values.embed.secretKey }}
+            {{- end }}
+            - name: VECTOR_BACKEND
+              value: {{ .Values.vector.backend | quote }}
+            {{- if .Values.vector.url }}
+            - name: VECTOR_URL
+              value: {{ .Values.vector.url | quote }}
+            {{- else if include "kurag.txtaiSidecar" . }}
+            - name: VECTOR_URL
+              value: "http://127.0.0.1:9670"
+            {{- end }}
+            - name: GRAPH_BACKEND
+              value: {{ .Values.graph.backend | quote }}
+            {{- with .Values.graph.url }}
+            - name: GRAPH_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.ui.existingSecret }}
+            - name: UI_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: {{ $.Values.ui.userKey }}
+            - name: UI_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: {{ $.Values.ui.passwordKey }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 9650
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- with .Values.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+        {{- if include "kurag.txtaiSidecar" . }}
+        - name: txtai
+          image: "{{ .Values.txtai.image.repository }}:{{ .Values.txtai.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.txtai.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            - name: LISTEN
+              value: "127.0.0.1:9670"
+            - name: DATA_DIR
+              value: /data/txtai
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          resources:
+            {{- toYaml .Values.txtai.resources | nindent 12 }}
+        {{- end }}
+      volumes:
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "kurag.claimName" . }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

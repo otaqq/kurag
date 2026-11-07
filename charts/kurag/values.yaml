@@ -1,0 +1,133 @@
+# kurag runs as one Pod on purpose: each namespace is a SQLite database on the volume, written by one process. The
+# chart has no replica count and updates with the Recreate strategy.
+
+image:
+  repository: ghcr.io/otaqq/kurag
+  # Default: the chart's appVersion
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Required: the name of a Secret you create; its key secretKey becomes API_KEY, which clients send as X-API-Key.
+apiKey:
+  existingSecret: ""
+  secretKey: api-key
+
+# The embedding API (OpenAI-compatible /v1/embeddings: Ollama, LiteLLM, vLLM, ...). url is required.
+embed:
+  url: ""
+  model: ""
+  # optional: a Secret holding the API's key
+  existingSecret: ""
+  secretKey: embed-api-key
+
+# Where nearest-neighbour search runs (README.md, "Settings"):
+#   memory  exact search over 8-bit vectors in kurag's memory (default)
+#   txtai   txtai's ANN (faiss): without url, the chart runs kurag-txtai next to kurag in the same Pod
+#   helixdb a HelixDB server: set url (e.g. http://helixdb:8080); run HelixDB yourself
+vector:
+  backend: memory
+  url: ""
+
+# Where similarity edges and the knowledge graph are walked: sqlite (default) or helixdb (set url)
+graph:
+  backend: sqlite
+  url: ""
+
+# The kurag-txtai sidecar (vector.backend txtai without url). Its indexes live on the same volume (txtai/) and are
+# filled again from kurag's data when they differ.
+txtai:
+  image:
+    repository: ghcr.io/otaqq/kurag-txtai
+    tag: ""
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 10m
+      memory: 128Mi
+    limits:
+      memory: 1Gi
+
+# The graph view at /ui, behind a Basic login: a Secret with the user and the password. Off when empty.
+ui:
+  existingSecret: ""
+  userKey: ui-user
+  passwordKey: ui-password
+
+# More environment variables for kurag (EDGE_NEIGHBOURS, EDGE_MIN, EMBED_BATCH, ...)
+extraEnv: []
+
+# The data folder (/data): one SQLite database per namespace. Without persistence, every restart starts empty.
+persistence:
+  enabled: true
+  existingClaim: ""
+  # "" uses the cluster's default StorageClass
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 10Gi
+
+service:
+  type: ClusterIP
+  port: 9650
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: kurag.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: kurag-tls
+  #    hosts:
+  #      - kurag.example.com
+
+# Memory grows with the vectors of open namespaces (about 350 MiB for 300,000 chunks of 768 dimensions with the
+# in-memory index; much less with txtai or HelixDB holding them).
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 2Gi
+
+podSecurityContext:
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  periodSeconds: 10
+
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  periodSeconds: 30
+  # opening large namespaces can take a while after a restart
+  failureThreshold: 10
+
+podAnnotations: {}
+podLabels: {}
+priorityClassName: ""
+nodeSelector: {}
+tolerations: []
+affinity: {}

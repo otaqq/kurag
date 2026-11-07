@@ -23,16 +23,35 @@ Tested with Japanese and English text, hundreds of thousands of chunks.
 
 ## Quick start
 
-Build the image and run it with an OpenAI-compatible embedding API (Ollama, LiteLLM, vLLM, ...):
+kurag needs an OpenAI-compatible embedding API (Ollama, LiteLLM, vLLM, ...).
+
+**Docker Compose** (from a clone of this repository):
 
 ```sh
-docker build -f docker/Dockerfile -t kurag .
-docker run -d -p 9650:9650 -v kurag-data:/data \
-  -e API_KEY=change-me \
-  -e EMBED_URL=http://embeddings.example:11434/v1 \
-  -e EMBED_MODEL=embeddinggemma \
-  kurag
+KURAG_API_KEY=change-me EMBED_URL=http://host.docker.internal:11434/v1 EMBED_MODEL=embeddinggemma \
+  docker compose -f docker/compose.yaml up -d
 ```
+
+`--profile txtai` adds the txtai vector index (with `VECTOR_BACKEND=txtai VECTOR_URL=http://txtai:9670`),
+`--profile helixdb` a HelixDB server.
+
+**Docker**:
+
+```sh
+docker run -d -p 9650:9650 -v kurag-data:/data -e API_KEY=change-me \
+  -e EMBED_URL=http://embeddings.example:11434/v1 -e EMBED_MODEL=embeddinggemma ghcr.io/otaqq/kurag
+```
+
+**Kubernetes** (Helm; one Pod with a volume, the API key from a Secret you create):
+
+```sh
+kubectl create secret generic kurag-api-key --from-literal=api-key=change-me
+helm install kurag oci://ghcr.io/otaqq/charts/kurag \
+  --set apiKey.existingSecret=kurag-api-key --set embed.url=http://ollama:11434/v1 --set embed.model=embeddinggemma
+```
+
+**systemd**: the release archives hold `kurag`, `kurag-sync` and units in `dist/systemd/` (`kurag.service`, and
+`kurag-sync.service` with a timer that sends what changed every hour).
 
 Add and search:
 
@@ -45,9 +64,7 @@ curl -s localhost:9650/search -H 'X-API-Key: change-me' -H 'Content-Type: applic
 ```
 
 Chunk ids are `<source>:<path>#<section>#<n>`; `/delete` removes every chunk whose id starts with a prefix.
-
-The binary alone: `docker build -f docker/Dockerfile --target bin --output type=local,dest=out .` writes
-`out/kurag` and `out/kurag-sync`; `dist/systemd/kurag.service` is an example unit.
+More on images, the chart and the units: [docs/architecture.md](docs/architecture.md), "Deployment".
 
 ### Settings (environment)
 
@@ -102,9 +119,10 @@ kurag-sync --config sources.toml extract --namespace team.docs --model gemma3:12
 
 `cargo test --workspace` runs the unit tests. The contract tests (`tests/contract/`) are black-box HTTP tests
 against a running server: start `fake-embed` (a stand-in embedding API in the same crate), point a server at it,
-then `KURAG_URL=http://localhost:9650 KURAG_API_KEY=... cargo test -p kurag-contract`.
+then `KURAG_URL=http://localhost:9650 KURAG_API_KEY=... cargo test -p kurag-contract`. CI
+(`.github/workflows/ci.yml`) runs these, `cargo fmt --check`, `clippy -D warnings`, the images and the Helm chart.
 
 ## License
 
-Apache License 2.0 ([LICENSE](LICENSE)). The graph view bundles Cytoscape.js (MIT, its notice is kept in
+Apache License 2.0 ([LICENSE](LICENSE), [NOTICE](NOTICE)). The graph view bundles Cytoscape.js (MIT, its notice is kept in
 `ui/vendor/cytoscape.min.js`).

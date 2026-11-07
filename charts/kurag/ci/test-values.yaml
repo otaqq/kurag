@@ -1,0 +1,25 @@
+# Values for `helm lint` / `helm template` in CI: every optional part on
+apiKey:
+  existingSecret: kurag-api-key
+embed:
+  url: http://embeddings.example:11434/v1
+  model: embeddinggemma
+  existingSecret: kurag-embed
+vector:
+  backend: txtai
+graph:
+  backend: helixdb
+  url: http://helixdb:8080
+ui:
+  existingSecret: kurag-ui
+extraEnv:
+  - name: EDGE_NEIGHBOURS
+    value: "10"
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: kurag.example.com
+      paths:
+        - path: /
+          pathType: Prefix
