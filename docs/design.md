@@ -8,7 +8,8 @@ Docs: this file (why and what), [architecture.md](architecture.md) (parts, state
 
 ## Why
 
-[txtai-kura](https://github.com/otaqq/txtai-kura) showed that most of such a server is not the database engine.
+txtai-kura (the Python server kurag replaces, built on txtai; not published) showed that most of such a server is not
+the database engine.
 Of its ~1,160 lines of Python, one import uses txtai (the faiss wrapper); the rest is the layer on top:
 cutting Japanese into bigrams, scoring and fusing hits, chunk id rules, prefix deletes, knowledge graph
 bookkeeping, the API. That layer is what users of the API depend on, and it should outlive any one engine.
@@ -108,7 +109,7 @@ only to the API, so it is the same for every backend, and part of it is a rule s
 (`<source>:<path>#<section>#<n>`) are cut by the client and deleted by prefix on the server. Keeping both sides
 in one workspace keeps that rule in one place.
 
-`kurag-sync` follows [txtai-kura-sync](https://github.com/otaqq/txtai-kura-sync):
+`kurag-sync` follows txtai-kura-sync (txtai-kura's Python client; not published):
 
 | Part | Does |
 |---|---|

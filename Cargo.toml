@@ -4,5 +4,5 @@ members = ["crates/kurag-core", "crates/kurag", "crates/kurag-sync", "tests/cont
 
 [workspace.package]
 edition = "2024"
-license = "MIT"
+license = "Apache-2.0"
 repository = "https://github.com/otaqq/kurag"
