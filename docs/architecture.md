@@ -4,7 +4,7 @@ How kurag is put together. Why it is built this way, and what it does, is in [de
 works inside (terms, scores, quantization, graphs) is in [search.md](search.md). Parts marked
 *to measure* wait for numbers; what is built so far is listed under "State".
 
-## State (v0.3.0)
+## State (v0.3.1)
 
 Built: `kurag-core` (tokenizer, scores, ids and namespaces, API types) and the `kurag` server with every API v1
 route, and the graph view (`/ui`, the txtai-kura view ported, nodes labelled with keywords: search.md, "Graph view
@@ -27,8 +27,10 @@ and section labels"). It passes the contract tests, as txtai-kura does. Differen
 - **One embedding URL**; no failover list or external picker yet.
 - **`kurag-sync` has extraction only** (`kurag-sync extract`, crate `crates/kurag-sync`): the port of
   txtai-kura-sync 0.4.1's `extract`, with the same command line, config keys, prompt, answer schema and limits (a
-  test pins them to a dump of the Python ones); the sync of sources comes next (design.md, "Plan"). It is built
-  with the server (`docker/Dockerfile`, both binaries).
+  test pins them to a dump of the Python ones, key order included: the model writes its answer in the schema's
+  order, and sorted keys gave other answers). On the same two chunks and model, both give the same entities,
+  relations and mentions. The sync of sources comes next (design.md, "Plan"). It is built with the server
+  (`docker/Dockerfile`, both binaries).
 - Chunks sent again with the same text reuse their stored vectors (no embedding call); they still get a new row id,
   so the knowledge graph treats them as to do again, as txtai-kura does.
 - Namespaces are not closed when idle.

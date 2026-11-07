@@ -552,6 +552,10 @@ mod tests {
         let py: Value = serde_json::from_str(include_str!("../testdata/txtai-kura-sync-0.4.1-extract.json")).unwrap();
         assert_eq!(py["prompt"], PROMPT);
         assert_eq!(py["schema"], schema());
+        // and in the same key order: the model writes its answer in the schema's order (name, type, description),
+        // so sorted keys gave other answers (serde_json's preserve_order)
+        let order = |v: &Value| serde_json::to_string(&v["properties"]["entities"]["items"]["properties"]).unwrap();
+        assert_eq!(order(&schema()), r#"{"name":{"type":"string","maxLength":100},"type":{"type":"string","maxLength":20},"description":{"type":"string","maxLength":200}}"#);
         assert_eq!((py["max_tokens"].as_u64(), py["max_text"].as_u64(), py["timeout"].as_u64()), (Some(MAX_TOKENS as u64), Some(MAX_TEXT as u64), Some(TIMEOUT)));
         assert_eq!(py["retries"], json!(RETRIES));
         let mut types = TYPES.to_vec();
