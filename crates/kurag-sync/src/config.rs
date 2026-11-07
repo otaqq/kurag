@@ -7,7 +7,9 @@ use std::path::Path;
 use toml::{Table, Value};
 
 /// The config file, then `<name>.local.toml` next to it (not in git, like .env: places that should not be on
-/// record). Local tables `[rag]`, `[text]` and `[extract]` replace the shared one's keys.
+/// record). A local `[[source]]` replaces the shared one of the same name, new names are added after the shared
+/// ones; local tables `[rag]`, `[text]`, `[extract]` and `[kinds]` replace the shared one's keys; a local `walls`
+/// replaces the shared list.
 pub fn load(path: &Path) -> Result<Table, String> {
     let read = |p: &Path| -> Result<Table, String> {
         let text = std::fs::read_to_string(p).map_err(|e| format!("{}: {e}", p.display()))?;
@@ -18,13 +20,26 @@ pub fn load(path: &Path) -> Result<Table, String> {
     let local = path.with_file_name(format!("{stem}.local.toml"));
     if local.exists() {
         let extra = read(&local)?;
-        for name in ["rag", "text", "extract"] {
+        let name_of = |s: &Value| s.get("name").and_then(Value::as_str).map(str::to_string);
+        if let Some(Value::Array(more)) = extra.get("source") {
+            let names: Vec<String> = more.iter().filter_map(name_of).collect();
+            let mut list: Vec<Value> = match cfg.get("source") {
+                Some(Value::Array(a)) => a.iter().filter(|s| !name_of(s).is_some_and(|n| names.contains(&n))).cloned().collect(),
+                _ => Vec::new(),
+            };
+            list.extend(more.iter().cloned());
+            cfg.insert("source".into(), Value::Array(list));
+        }
+        for name in ["rag", "text", "extract", "kinds"] {
             if let Some(Value::Table(more)) = extra.get(name) {
                 let table = cfg.entry(name).or_insert_with(|| Value::Table(Table::new()));
                 if let Value::Table(t) = table {
                     t.extend(more.clone());
                 }
             }
+        }
+        if let Some(w) = extra.get("walls") {
+            cfg.insert("walls".into(), w.clone());
         }
     }
     Ok(cfg)
@@ -65,9 +80,16 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("kurag-sync-config-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("kura.toml"), "[rag]\nurl = \"http://a\"\napi_key_env = \"K\"\n[extract]\nmodel = \"m\"\n").unwrap();
-        std::fs::write(dir.join("kura.local.toml"), "[rag]\nurl = \"http://b\"\n").unwrap();
+        std::fs::write(dir.join("kura.local.toml"), "[rag]\nurl = \"http://b\"\n[[source]]\nname = \"a\"\nkind = \"local\"\n\
+                                                    [[source]]\nname = \"c\"\n").unwrap();
         std::fs::write(dir.join(".env"), "# c\nK='secret'\n\nX = 1\n").unwrap();
+        let mut shared = std::fs::read_to_string(dir.join("kura.toml")).unwrap();
+        shared.push_str("[[source]]\nname = \"a\"\n[[source]]\nname = \"b\"\n");
+        std::fs::write(dir.join("kura.toml"), shared).unwrap();
         let cfg = load(&dir.join("kura.toml")).unwrap();
+        let names: Vec<&str> = cfg["source"].as_array().unwrap().iter().map(|s| s["name"].as_str().unwrap()).collect();
+        assert_eq!(names, ["b", "a", "c"]);
+        assert_eq!(cfg["source"][1]["kind"].as_str(), Some("local"));
         assert_eq!(string(table(&cfg, "rag"), "url").as_deref(), Some("http://b"));
         assert_eq!(string(table(&cfg, "rag"), "api_key_env").as_deref(), Some("K"));
         assert_eq!(string(table(&cfg, "extract"), "model").as_deref(), Some("m"));

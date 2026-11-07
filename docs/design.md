@@ -129,9 +129,11 @@ extraction) live next to the server and serve every backend alike.
    as `txtai-kura-sync extract` (namespace, model, API bases or a bases file re-read per batch, parallel slots,
    minutes, limit, dry run), the same JSON schema with item limits, the same `/kg/todo` and `/kg/upsert` calls.
    Accepted when a dry run on the same chunks asks the same prompts and a real run fills the same counts.
-2. **Sync second** (`kurag-sync run`): same `sources.toml` keys and chunking (Markdown by `## `, PDF by page through
-   `pdftotext`, EPUB by chapter, text), so chunk ids stay the same; it reads txtai-kura-sync's state files, so the
-   first run sends nothing that has not changed. Accepted when a dry run against an existing state lists no change.
+2. **Sync second** (`kurag-sync run`, built in v0.4.0): same `sources.toml` keys and chunking (Markdown by `## `,
+   PDF by page through `pdftotext`, EPUB by chapter, text), so chunk ids stay the same; it reads txtai-kura-sync's
+   state files, so the first run sends nothing that has not changed. Also the folder settings (`.rag.toml`) and
+   `walls` of the deployment it replaces. Accepted when a dry run against an existing state lists the same changes
+   as the Python one: it did, line for line (architecture.md, "Sync client").
 3. Then txtai-kura-sync is archived.
 
 One Rust binary with no runtime dependencies besides `pdftotext` (PDF) and `git` (git sources), like the server.

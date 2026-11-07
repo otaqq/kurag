@@ -1,30 +1,52 @@
-//! kurag-sync: the client that fills a kurag server (docs/design.md, "Why the sync client is here"). For now the
-//! knowledge graph extraction, with the command line and config of txtai-kura-sync 0.4.1:
+//! kurag-sync: the client that fills a kurag server (docs/design.md, "Why the sync client is here"), with the
+//! command line and config of txtai-kura-sync:
 //!
-//!   kurag-sync [--config sources.toml] [--data DIR] [--env-file .env] extract --namespace NAMESPACE
+//!   kurag-sync [--config sources.toml] [--data DIR] [--env-file .env] run [--source NAME] [--kind KIND]
+//!              [--namespace NAMESPACE] [--due] [--dry-run]       send what changed (sync.rs)
+//!   kurag-sync ... status                                        parts tracked here, chunks per namespace there
+//!   kurag-sync ... shelves [--source NAME] [--files]              which namespace each folder goes to, and why
+//!   kurag-sync text --file PATH                                   the text run reads from a file (no cache)
+//!   kurag-sync ... extract --namespace NAMESPACE
 //!              [--model M] [--api-base URL ... | --api-bases-file F] [--json-mode schema|object|none]
-//!              [--api-key-env VAR] [--parallel N] [--minutes M] [--limit N] [--dry-run]
+//!              [--api-key-env VAR] [--parallel N] [--minutes M] [--limit N] [--dry-run]   knowledge graph
 //!
-//! Config: `[rag] url`, `api_key_env` (default RAG_API_KEY); `[extract] model`, `api_base` (a string or a list),
-//! `api_key_env`, `json_mode`, `parallel`, `minutes`. Options win over the config. `--data` is accepted for the
-//! same command line; extraction keeps no state of its own (the server marks chunks done).
+//! Config: `[rag] url`, `api_key_env` (default RAG_API_KEY); `[text] intro`, `source`; `walls`; `[kinds.<kind>]`
+//! and `[[source]]` (sync.rs); `[extract] model`, `api_base` (a string or a list), `api_key_env`, `json_mode`,
+//! `parallel`, `minutes`. Options win over the config. `--data` holds state and cache (default
+//! $XDG_STATE_HOME/kurag-sync or ~/.local/state/kurag-sync); extraction keeps no state of its own.
 
 mod config;
+mod entities;
 mod extract;
+mod html;
+mod pystr;
+mod read;
+mod split;
+mod sync;
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use extract::{Bases, JsonMode, Llm, Model, Rag, Settings, log};
 
-const USAGE: &str = "usage: kurag-sync [--config FILE] [--data DIR] [--env-file FILE] extract --namespace NAMESPACE \
-[--model M] [--api-base URL ... | --api-bases-file FILE] [--json-mode schema|object|none] [--api-key-env VAR] \
-[--parallel N] [--minutes M] [--limit N] [--dry-run]";
+const USAGE: &str = "usage: kurag-sync [--config FILE] [--data DIR] [--env-file FILE] COMMAND
+  run [--source NAME] [--kind KIND] [--namespace NAMESPACE] [--due] [--dry-run]
+  status
+  shelves [--source NAME] [--files]
+  text --file PATH
+  extract --namespace NAMESPACE [--model M] [--api-base URL ... | --api-bases-file FILE] [--json-mode schema|object|none]
+          [--api-key-env VAR] [--parallel N] [--minutes M] [--limit N] [--dry-run]";
 
 #[derive(Default)]
 struct Args {
     config: Option<PathBuf>,
+    data: Option<PathBuf>,
     env_file: Option<PathBuf>,
+    source: Option<String>,
+    kind: Option<String>,
+    due: bool,
+    files: bool,
+    file: Option<PathBuf>,
     command: Option<String>,
     namespace: Option<String>,
     model: Option<String>,
@@ -50,9 +72,12 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         let number = |v: String| v.parse::<f64>().map_err(|_| format!("{name}: not a number: {v}"));
         match name {
             "--config" => a.config = Some(value()?.into()),
-            "--data" => {
-                value()?;
-            }
+            "--data" => a.data = Some(value()?.into()),
+            "--source" => a.source = Some(value()?),
+            "--kind" => a.kind = Some(value()?),
+            "--due" => a.due = true,
+            "--files" => a.files = true,
+            "--file" => a.file = Some(value()?.into()),
             "--env-file" => a.env_file = Some(value()?.into()),
             "--namespace" => a.namespace = Some(value()?),
             "--model" => a.model = Some(value()?),
@@ -86,11 +111,136 @@ fn main() {
     };
     std::process::exit(match a.command.as_deref() {
         Some("extract") => extract_command(a),
+        Some("text") => match a.file.as_deref().map(read::fresh_text) {
+            Some(Some(t)) => {
+                print!("{t}");
+                0
+            }
+            Some(None) => 1,
+            None => {
+                eprintln!("{USAGE}");
+                2
+            }
+        },
+        Some(cmd @ ("run" | "status" | "shelves")) => {
+            let cmd = cmd.to_string();
+            sync_command(&cmd, a)
+        }
         _ => {
             eprintln!("{USAGE}");
             2
         }
     });
+}
+
+struct Setup {
+    sources: sync::Sources,
+    env: std::collections::HashMap<String, String>,
+    paths: sync::Paths,
+    rag: sync::Rag,
+}
+
+fn setup(a: &Args) -> Result<Setup, String> {
+    let config_path = a.config.clone().unwrap_or_else(|| PathBuf::from("sources.toml"));
+    let cfg = config::load(&config_path)?;
+    let env_file = a.env_file.clone().unwrap_or_else(|| config_path.with_file_name(".env"));
+    let mut env = config::load_env(&env_file);
+    env.extend(std::env::vars());
+    let rag_cfg = config::table(&cfg, "rag");
+    let url = config::string(rag_cfg, "url").ok_or(format!("{}: [rag] url is missing", config_path.display()))?;
+    let key_env = config::string(rag_cfg, "api_key_env").unwrap_or_else(|| "RAG_API_KEY".into());
+    let rag = sync::Rag::new(&url, env.get(&key_env).map_or("", String::as_str));
+    let data = a.data.clone().unwrap_or_else(|| {
+        let base = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/state"));
+        base.join("kurag-sync")
+    });
+    Ok(Setup { sources: sync::Sources::new(cfg)?, env, paths: sync::Paths::new(&data), rag })
+}
+
+fn sync_command(cmd: &str, a: Args) -> i32 {
+    let s = match setup(&a) {
+        Ok(s) => s,
+        Err(e) => {
+            log(&format!("error: {e}"));
+            return 2;
+        }
+    };
+    if let Some(src) = a.source.as_deref() {
+        if s.sources.disabled.iter().any(|d| d == src) {
+            log(&format!("{src}: enabled = false; nothing to do"));
+            return 0;
+        }
+    }
+    if let Err(e) = std::fs::create_dir_all(&s.paths.state) {
+        log(&format!("error: {}: {e}", s.paths.state.display()));
+        return 2;
+    }
+    match cmd {
+        "status" => return sync::status(&s.sources, &s.paths, &s.rag), // read-only: never waits for a running sync
+        "shelves" => return sync::shelves(&s.sources, a.source.as_deref(), a.files),
+        _ => {}
+    }
+    // one run at a time: wait (up to 30 minutes) for a run that is already going, instead of failing
+    let lock = match std::fs::File::create(s.paths.lock_file()) {
+        Ok(f) => f,
+        Err(e) => {
+            log(&format!("error: {}: {e}", s.paths.lock_file().display()));
+            return 2;
+        }
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1800);
+    loop {
+        match lock.try_lock() {
+            Ok(()) => break,
+            Err(std::fs::TryLockError::WouldBlock) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_secs(10))
+            }
+            Err(std::fs::TryLockError::WouldBlock) => {
+                log("another run has been going for 30 minutes; exit");
+                return 1;
+            }
+            Err(std::fs::TryLockError::Error(e)) => {
+                log(&format!("error: lock: {e}"));
+                return 2;
+            }
+        }
+    }
+    let started = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
+    let mut args = sync::RunArgs { only: a.source.as_deref(), kind: a.kind.as_deref(), names: None, under: a.namespace.as_deref(), dry: a.dry_run };
+    if a.due {
+        let names = sync::due(&s.sources, &s.paths, started);
+        log(&format!("due: {}", if names.is_empty() { "nothing".to_string() } else { names.join(", ") }));
+        if names.is_empty() {
+            return 0;
+        }
+        args = sync::RunArgs { only: None, kind: None, names: Some(names.clone()), under: None, dry: a.dry_run };
+        return match sync::run(&s.sources, &s.env, &s.paths, &s.rag, &args) {
+            Ok(rc) => {
+                if rc == 0 && !a.dry_run {
+                    sync::mark_runs(&s.paths, &names, started); // with errors, they are due again next hour
+                }
+                rc
+            }
+            Err(e) => {
+                log(&format!("error: {e}"));
+                1
+            }
+        };
+    }
+    match sync::run(&s.sources, &s.env, &s.paths, &s.rag, &args) {
+        Ok(rc) => {
+            // a full or a kind run also counts for --due (not a part of one namespace)
+            if rc == 0 && !a.dry_run && a.namespace.is_none() {
+                sync::mark_runs(&s.paths, &sync::ran(&s.sources, a.source.as_deref(), a.kind.as_deref()), started);
+            }
+            rc
+        }
+        Err(e) => {
+            log(&format!("error: {e}"));
+            1
+        }
+    }
 }
 
 fn extract_command(a: Args) -> i32 {

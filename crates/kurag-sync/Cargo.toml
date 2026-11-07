@@ -1,6 +1,6 @@
 [package]
 name = "kurag-sync"
-version = "0.3.1"
+version = "0.4.0"
 description = "Client for a kurag server: keeps shelves of documents in step with it and extracts a knowledge graph"
 edition.workspace = true
 license.workspace = true
@@ -10,5 +10,7 @@ repository.workspace = true
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1", features = ["preserve_order"] }  # the answer schema's key order steers the model
-toml = "0.8"
+serde_json = { version = "1", features = ["preserve_order", "float_roundtrip"] }  # the answer schema's key order steers the model; cached mtimes must read back exactly
+toml = { version = "0.8", features = ["preserve_order"] }  # [source.map] is read in its order
+sha2 = "0.11"
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }  # EPUB; zlib-rs is pure Rust (static musl builds)

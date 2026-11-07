@@ -4,7 +4,7 @@ How kurag is put together. Why it is built this way, and what it does, is in [de
 works inside (terms, scores, quantization, graphs) is in [search.md](search.md). Parts marked
 *to measure* wait for numbers; what is built so far is listed under "State".
 
-## State (v0.3.1)
+## State (v0.4.0)
 
 Built: `kurag-core` (tokenizer, scores, ids and namespaces, API types) and the `kurag` server with every API v1
 route, and the graph view (`/ui`, the txtai-kura view ported, nodes labelled with keywords: search.md, "Graph view
@@ -28,12 +28,12 @@ and section labels"). It passes the contract tests, as txtai-kura does. Differen
   namespace's tables, `helixdb` a copy in a HelixDB server kept at the tables' `graph_version` (search.md, "Graph
   backends"). `/search` takes `kg: n` (hybrid only) to fuse the chunks the knowledge graph reaches from the query.
 - **One embedding URL**; no failover list or external picker yet.
-- **`kurag-sync` has extraction only** (`kurag-sync extract`, crate `crates/kurag-sync`): the port of
-  txtai-kura-sync 0.4.1's `extract`, with the same command line, config keys, prompt, answer schema and limits (a
-  test pins them to a dump of the Python ones, key order included: the model writes its answer in the schema's
-  order, and sorted keys gave other answers). On the same two chunks and model, both give the same entities,
-  relations and mentions. The sync of sources comes next (design.md, "Plan"). It is built with the server
-  (`docker/Dockerfile`, both binaries).
+- **`kurag-sync` has extraction and sync** (crate `crates/kurag-sync`, built with the server by
+  `docker/Dockerfile`, both binaries). `extract` is the port of txtai-kura-sync 0.4.1's `extract`, with the same
+  command line, config keys, prompt, answer schema and limits (a test pins them to a dump of the Python ones, key
+  order included: the model writes its answer in the schema's order, and sorted keys gave other answers). On the
+  same two chunks and model, both give the same entities, relations and mentions. `run`, `status` and `shelves`
+  are the port of the sync (below, "Sync client").
 - Chunks sent again with the same text reuse their stored vectors (no embedding call); they still get a new row id,
   so the knowledge graph treats them as to do again, as txtai-kura does.
 - Namespaces are not closed when idle.
@@ -254,6 +254,61 @@ exits with a message without them). TLS to the embedding API uses the bundled Mo
 system store, so an embedding API behind a private CA needs plain HTTP on a trusted network for now. On SIGTERM the
 server finishes the requests in flight and exits. The release binary passes the contract tests.
 
+## Sync client
+
+`kurag-sync run` keeps a server in step with files (design.md, "Plan", step 2). It reads a sources file and
+txtai-kura-sync's state, so a setup moves over without sending anything again.
+
+```mermaid
+flowchart LR
+  src["sources.toml<br/>(+ sources.local.toml)"] --> walk["list files<br/>git / dir / shelf / shelves<br/>.rag.toml per folder"]
+  walk --> stamp{"size and mtime<br/>as last run?<br/>(files.json)"}
+  stamp -- same --> skip["not opened"]
+  stamp -- changed --> read["read: Markdown, text,<br/>PDF (pdftotext), EPUB<br/>(cache/text)"]
+  read --> parts["parts: ## section,<br/>page, chapter"]
+  parts --> sha{"sha256 and namespace<br/>as in state.json?"}
+  sha -- same --> keep["nothing sent"]
+  sha -- changed --> send["/delete <part>#<br/>/upsert chunks"]
+  walk --> gone["parts no file gives<br/>any more"] --> del["/delete <part>#"]
+```
+
+- **Sources**: `git` (shallow clone in `cache/git/<name>`; `token_env` names the env var holding a token,
+  `token_auth` = `token` / `bearer` / `basic`), `dir` (one folder or a list; with a list, ids start with the
+  folder's name), `shelf` (`[source.map]`: namespace -> folders, `sub` appended) and `shelves` (every folder under
+  `path` named like a namespace; `prefix`, `only`). `include` / `exclude` are fnmatch patterns where a leading
+  `**/` may also match nothing; `prefer = ["epub", "pdf"]` keeps one format of the same book; `max_minutes` stops a
+  source and leaves the rest for the next run; `enabled = false` leaves a source out (what it sent stays).
+  Sources of other types are left out with one log line, so a sources file can be shared with other tools.
+- **Folder settings**: inside a shelf source's folders, a `.rag.toml` (`namespace` = ..., or `shelf` as in
+  older files; `[[file]]` path / namespace) sets the namespace of the files below it; the nearest setting wins,
+  and in one folder the `.rag.toml` wins over the map. `kurag-sync shelves` lists each folder's namespace and the
+  setting that decided it. `walls` (top level, e.g. `["private"]`) lists first namespace segments kept apart: a
+  `.rag.toml` may not move a file into or out of them; a broken or wrong one stops the files under it.
+- **Parts and ids**: Markdown by `## ` (not inside code fences; the text before the first section is
+  `[text] intro`; a repeated heading gets ` (2)`), PDF by page (`#p.<n>`), EPUB by chapter (`#ch.<n>`), other files
+  whole. Each part starts with the title and `[text] source` (`{where}` = label/path and page). Pages with fewer
+  than 50 letters are left out (scans without a text layer). Chunks of at most 1,500 characters at paragraph
+  breaks; ids `<source>:<path>#<section>#<n>`.
+- **The same bytes as Python**: a part sent before is recognised by the sha256 of its text, so the text must come
+  out exactly as txtai-kura-sync made it. Lines are split, stripped and counted by Python's rules (`pystr.rs`:
+  `splitlines`, `isspace`, code points), files are read with universal newlines, EPUB chapters go through a port
+  of Python 3.14's `html.parser` fed once and never closed (`html.rs`) with `html.unescape`'s tables
+  (`entities.rs`, generated from Python), and the PDF and EPUB cache is the same file (`cache/text/<sha256 of
+  the absolute path, 32>.json` with size and mtime; JSON floats are read exactly, `float_roundtrip`, or no cached
+  mtime would match).
+- **State**: `<data>/state/state.json` (part -> sha, namespace, chunks; saved after every batch of 200 chunks),
+  `files.json` (file -> size, mtime_ns, namespace: unchanged files are not opened), `runs.json` (for `--due`:
+  `cron` "min hour day month weekday" once in a matching hour, or `every` / `at`; per source or per
+  `[kinds.<kind>]`), `lock` (one run at a time; a second waits up to 30 minutes). Nothing is deleted as gone after
+  a run stopped by `max_minutes`; with errors, files.json is not updated, so changed files are read again.
+- **Checking a reader**: `kurag-sync text --file F` prints the text a file gives, without the cache.
+
+Measured against txtai-kura-sync's Python (a deployment with 1,086 files: 209,085 parts, of them about 204,000
+PDF pages, 724 EPUB chapters, 837 Markdown sections; the same state copied for both, files.json removed so every
+file was read, PDF and EPUB text from a copy of the same cache): both dry runs listed the same 82,374 changes
+(the books not sent yet), line for line, with no error. Without the cache, the text of all 13 EPUB files and of
+40 PDF files picked at random was the same as Python's. Reading every file took 2 min 57 s (Python 9 min 31 s).
+
 ## Layout
 
 Same layout as other Rust services by the same author:
@@ -262,7 +317,7 @@ Same layout as other Rust services by the same author:
 Cargo.toml            workspace
 crates/kurag-core/    library
 crates/kurag/         server + CLI
-crates/kurag-sync/    client: knowledge graph extraction now; sources -> chunks -> server next
+crates/kurag-sync/    client: sources -> chunks -> server (run, status, shelves), knowledge graph extraction
 ui/                   kurag-ui: the graph view, plain files built into the server (feature "ui", served
                       at /ui); ui/vendor/ holds Cytoscape.js
 tests/contract/       black-box HTTP tests (run against any server with this API) and fake-embed, the
