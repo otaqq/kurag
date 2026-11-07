@@ -64,7 +64,7 @@ curl -s localhost:9650/search -H 'X-API-Key: change-me' -H 'Content-Type: applic
 ```
 
 Chunk ids are `<source>:<path>#<section>#<n>`; `/delete` removes every chunk whose id starts with a prefix.
-More on images, the chart and the units: [docs/architecture.md](docs/architecture.md), "Deployment".
+More on images, the chart and the units: [docs/deployment.md](docs/deployment.md).
 
 ### Settings (environment)
 
@@ -111,8 +111,13 @@ kurag-sync --config sources.toml extract --namespace team.docs --model gemma3:12
 
 ## Documentation
 
-- [docs/design.md](docs/design.md): why kurag exists, principles, API, contract tests, plan
-- [docs/architecture.md](docs/architecture.md): parts, state, storage, deployment, the sync client, measurements
+- [docs/api.md](docs/api.md): every route, request and answer, scores, errors
+- [docs/configuration.md](docs/configuration.md): server settings, backends, kurag-sync's sources file
+- [docs/deployment.md](docs/deployment.md): images, Docker Compose, Helm, systemd, upgrades, backups, security
+- [docs/operations.md](docs/operations.md): memory, disk and latency (measured), watching it, troubleshooting
+- [docs/development.md](docs/development.md): build, tests, CI, releases
+- [docs/design.md](docs/design.md): why kurag exists, principles, contract tests, plan
+- [docs/architecture.md](docs/architecture.md): parts, state, storage, the sync client, measurements
 - [docs/search.md](docs/search.md): how search works inside (tokenizer, scores, quantization, graphs)
 
 ## Development
