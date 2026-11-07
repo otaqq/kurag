@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/kurag-core", "crates/kurag", "tests/contract"]
+members = ["crates/kurag-core", "crates/kurag", "crates/kurag-sync", "tests/contract"]
 
 [workspace.package]
 edition = "2024"

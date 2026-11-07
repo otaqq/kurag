@@ -125,7 +125,7 @@ It comes after the server: txtai-kura-sync keeps working against kurag meanwhile
 `kurag-sync` replaces txtai-kura-sync, so that the shelf rules (sources, namespaces, chunk ids, what was sent,
 extraction) live next to the server and serve every backend alike.
 
-1. **Extraction first** (`kurag-sync extract`): the part in use today. Same command-line options and config keys
+1. **Extraction first** (`kurag-sync extract`, built in v0.3.0): the part in use today. Same command-line options and config keys
    as `txtai-kura-sync extract` (namespace, model, API bases or a bases file re-read per batch, parallel slots,
    minutes, limit, dry run), the same JSON schema with item limits, the same `/kg/todo` and `/kg/upsert` calls.
    Accepted when a dry run on the same chunks asks the same prompts and a real run fills the same counts.

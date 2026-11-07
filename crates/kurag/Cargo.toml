@@ -1,6 +1,6 @@
 [package]
 name = "kurag"
-version = "0.2.0"
+version = "0.3.0"
 description = "Retrieval server for RAG: vector, full-text and hybrid search, a similarity graph and a knowledge graph"
 edition.workspace = true
 license.workspace = true
