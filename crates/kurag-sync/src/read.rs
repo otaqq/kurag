@@ -69,14 +69,13 @@ fn cached(path: &Path, cache_dir: &Path, read: fn(&Path) -> Option<String>) -> O
     let name = sha256_hex(&absolute.to_string_lossy())[..32].to_string() + ".json";
     let cache = cache_dir.join("text").join(name);
     let (size, mtime) = (meta.len(), mtime_float(&meta));
-    if let Ok(raw) = std::fs::read_to_string(&cache) {
-        if let Ok(c) = serde_json::from_str::<Value>(&raw) {
-            if c["size"].as_u64() == Some(size) && c["mtime"].as_f64() == Some(mtime) {
-                if let Some(t) = c["text"].as_str() {
-                    return Some(t.to_string());
-                }
-            }
-        }
+    if let Ok(raw) = std::fs::read_to_string(&cache)
+        && let Ok(c) = serde_json::from_str::<Value>(&raw)
+        && c["size"].as_u64() == Some(size)
+        && c["mtime"].as_f64() == Some(mtime)
+        && let Some(t) = c["text"].as_str()
+    {
+        return Some(t.to_string());
     }
     let text = read(path)?;
     let pages: Vec<&str> = text.split('\u{c}').collect();
