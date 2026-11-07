@@ -63,6 +63,10 @@ pub struct Search {
     /// only follow edges at least this similar
     #[serde(default = "min_weight")]
     pub min_weight: f64,
+    /// knowledge graph (hybrid only): walk this many steps from the entities named in the query, and fuse the
+    /// chunks that mention the entities reached as a third list (0: off)
+    #[serde(default)]
+    pub kg: usize,
 }
 
 fn five() -> usize {
@@ -164,7 +168,12 @@ fn within(name: &str, v: usize, lo: usize, hi: usize) -> Result<(), String> {
 impl Check for Search {
     fn check(&self) -> Result<(), String> {
         within("limit", self.limit, 1, 1000)?;
-        within("graph", self.graph, 0, 100)
+        within("graph", self.graph, 0, 100)?;
+        within("kg", self.kg, 0, 3)?;
+        if self.kg > 0 && self.mode != Mode::Hybrid {
+            return Err("kg works with mode hybrid only".into());
+        }
+        Ok(())
     }
 }
 

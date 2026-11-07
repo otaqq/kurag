@@ -214,6 +214,9 @@ Each engine does what it measured best at; kurag keeps what neither has.
   (3) graph expansion of hits through HelixDB.
 - **A second trait**, `GraphStore` (put / remove edges, entities, relations, mentions; neighbours; walk), next to
   `RemoteIndex`; `sqlite` stays the default, so a single machine needs neither engine.
+- **Built (kurag #1, first part)**: the trait, HelixDB as graph backend, `kg` in hybrid search. Contract tests pass
+  with both; on a copy of real data HelixDB gives the same answers, more slowly (search.md, "Graph backends").
+  Still open: the eval questions that span documents, and filling and memory at production size.
 - **Accepted when**: the contract tests pass with `GRAPH_BACKEND=helixdb`; the eval set's recall@5 for hybrid search
   with the knowledge graph is not lower than without; latency and memory are measured on a copy of real data, as for
   the vector backends.

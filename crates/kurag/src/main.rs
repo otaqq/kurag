@@ -56,7 +56,20 @@ async fn main() {
     };
     // the external index's HTTP client is a blocking one (used from the blocking pool): made outside the runtime
     let (kind, url) = (cfg.vector_backend.clone(), cfg.vector_url.clone());
-    let made = std::thread::spawn(move || backend::from_settings(&kind, url.as_deref())).join().expect("backend thread");
+    let (gkind, gurl) = (cfg.graph_backend.clone(), cfg.graph_url.clone());
+    let (made, graph) = std::thread::spawn(move || {
+        (backend::from_settings(&kind, url.as_deref()), backend::graph_from_settings(&gkind, gurl.as_deref()))
+    })
+    .join()
+    .expect("backend thread");
+    let graph: Option<Arc<dyn backend::GraphStore>> = match graph {
+        Ok(g) => g.map(Arc::from),
+        Err(e) => {
+            eprintln!("kurag: {e}");
+            std::process::exit(2);
+        }
+    };
+    let graph_name = graph.as_ref().map_or("sqlite", |g| g.name()).to_string();
     let remote = match made {
         Ok(r) => r.map(Arc::from),
         Err(e) => {
@@ -66,7 +79,7 @@ async fn main() {
     };
     let index = remote.as_ref().map_or("memory".to_string(), |r: &Arc<dyn backend::RemoteIndex>| r.name().to_string());
     let app = Arc::new(http::App {
-        store: store::Store::new(cfg.data_dir.clone(), remote),
+        store: store::Store::new(cfg.data_dir.clone(), remote).with_graph(graph),
         embed: embed::Embedder::new(&cfg),
         cfg,
     });
@@ -74,7 +87,7 @@ async fn main() {
         eprintln!("kurag: cannot listen on {}: {e}", app.cfg.listen);
         std::process::exit(2);
     });
-    eprintln!("kurag {}: listening on {}, data in {}, vector index {index}", env!("CARGO_PKG_VERSION"), app.cfg.listen, app.cfg.data_dir.display());
+    eprintln!("kurag {}: listening on {}, data in {}, vector index {index}, graph {graph_name}", env!("CARGO_PKG_VERSION"), app.cfg.listen, app.cfg.data_dir.display());
     axum::serve(listener, http::router(app))
         .with_graceful_shutdown(async {
             // SIGINT, or SIGTERM as sent by Kubernetes and systemd

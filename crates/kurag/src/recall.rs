@@ -77,6 +77,8 @@ pub async fn run(path: &Path, data: &Path) -> Result<(), String> {
         ui_password: None,
         vector_backend: String::new(),
         vector_url: None,
+        graph_backend: String::new(),
+        graph_url: None,
     };
     let embedder = Embedder::new(&cfg);
     let store = Store::new(data.to_path_buf(), None);

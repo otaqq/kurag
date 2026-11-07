@@ -234,6 +234,36 @@ async fn knowledge_graph() {
 }
 
 #[tokio::test]
+async fn knowledge_graph_in_search() {
+    let api = api!("kgsearch");
+    let it = api.ns("it");
+    let texts = [
+        "Kubernetes の Pod はコンテナをまとめて動かす単位です。",
+        "分散キーバリューストアのバックアップと復旧の手順。",
+        "PostgreSQL のバックアップは pg_dump で取ります。",
+        "認証には OAuth2 と OpenID Connect を使います。",
+    ];
+    api.upsert("it", docs("book:k8s.md#S", &texts)).await;
+    api.post("/kg/upsert", json!({"namespace": it,
+        "relations": [{"source": "Kubernetes", "target": "etcd", "type": "stores state in", "chunk": "book:k8s.md#S#0"}],
+        "mentions": [{"entity": "Kubernetes", "chunk": "book:k8s.md#S#0"}, {"entity": "etcd", "chunk": "book:k8s.md#S#1"}]})).await;
+    let score = |hits: &[Value], id: &str| hits.iter().find(|h| h["id"] == id).and_then(|h| h["score"].as_f64());
+    let q = json!({"query": "Kubernetes", "mode": "hybrid", "limit": 10});
+    let without = api.search(q.clone()).await;
+    let mut with_kg = q.clone();
+    with_kg["kg"] = json!(1);
+    let with = api.search(with_kg).await;
+    // the chunk that mentions etcd, which Kubernetes stores its state in, rises: one more list in the fusion
+    let (a, b) = (score(&without, "book:k8s.md#S#1").unwrap_or(0.0), score(&with, "book:k8s.md#S#1").unwrap());
+    assert!(b > a, "{a} -> {b}");
+    // a chunk the graph does not reach keeps its score
+    assert_eq!(score(&without, "book:k8s.md#S#3"), score(&with, "book:k8s.md#S#3"));
+    // the knowledge graph is fused by rank: hybrid only
+    let (status, _) = api.post_status("/search", json!({"query": "Kubernetes", "namespaces": [it], "mode": "vector", "kg": 1})).await;
+    assert_eq!(status, 422);
+}
+
+#[tokio::test]
 async fn kg_todo_and_done() {
     let api = api!("todo");
     let it = api.ns("it");

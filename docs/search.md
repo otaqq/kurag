@@ -200,6 +200,54 @@ questions about them; it does not extract.
   on name and description (same terms as above), then the relations around them up to `depth` steps, with the
   chunks that mention each entity.
 
+## Knowledge graph in search
+
+With `kg: n` (hybrid only, n up to 3) a search adds a third list to the fusion: the entities named in the query
+(found as in `/kg/search`: same name first, then full text on names and descriptions; at most 10), walked n steps
+along their relations, give the chunks that mention the entities reached, ranked by cosine similarity to the
+query. A chunk the graph reaches gains one more RRF term; a chunk it does not reach keeps its score. Whether this
+finds better answers is not measured yet: that needs questions whose answer spans several documents.
+
+## Graph backends: SQLite and HelixDB
+
+`GRAPH_BACKEND` chooses where the similarity edges and the knowledge graph are walked: `sqlite` (default, the
+namespace's tables) or `helixdb` (`GRAPH_URL`). What is walked there: graph expansion of hits (`graph`), the
+relations of `/kg/search`, and the knowledge graph in search (`kg`). Names, descriptions, chunk texts and the graph
+view's sections still come from the tables.
+
+- **The tables stay the truth.** HelixDB holds a copy: nodes `KGChunk {ns, vid, id}`, `KGEntity {ns, eid}` and
+  `KGMeta {ns, version}`, edges `SIMILAR {w}` (once per pair, walked both ways), `RELATES {type, weight, chunk}` and
+  `MENTIONS`. Every write goes to the tables and to the copy in one transaction and raises the namespace's
+  `graph_version` in both; a failed write to the copy rolls the tables back. A copy at another version (a failed
+  write, a server restarted empty, data copied in) is filled again from the tables before it is read, and on
+  `/rebuild`. Relations and mentions sent again replace themselves: kurag removes the set they belong to from the
+  copy and adds back what the tables hold.
+- **Query forms that matter.** HelixDB uses an index only for values given as parameters (`{ns: $ns}`,
+  `x IN $list`), not for values taken from an `UNWIND` row: creating each edge by matching both ends in Cypher
+  scanned the whole label per row and ran out of time. Nodes are therefore looked up by `IN` lists and edges made by
+  node id in native write batches. And a match on both `ns` and an id list started from the namespace's nodes (2.5 s
+  for the edges of two chunks); starting from the id list and checking `ns` after a `WITH` took 0.02 s, so every
+  query starts from the ids.
+
+Measured on copies of five real namespaces (47,313 chunks, 365,768 similarity edges, 15,739 entities, 28,785
+relations, 41,939 mentions; 2 vCPU, a spinning disk under HelixDB), the same 77 questions to two servers on the same
+data, one per backend:
+
+| | SQLite | HelixDB |
+|---|---|---|
+| results (graph expansion, knowledge graph in search, `/kg/search` depth 2) | | the same as SQLite, all three |
+| hybrid with `graph: 5`, p50 / p95 | 59 / 111 ms | 93 / 157 ms |
+| hybrid with `kg: 2`, p50 / p95 | 68 / 162 ms | 238 / 1,171 ms |
+| `/kg/search` depth 2, p50 / p95 | 14 / 27 ms | 143 / 674 ms |
+| knowledge-graph upsert of one chunk's extraction | 0.01–0.02 s | 0.4–0.6 s |
+| upsert of two chunks / delete by prefix | 0.10 / 0.06 s | 0.85 / 1.0 s |
+| filling the copy | | 166 s |
+| memory | in kurag (59 MB) | kurag 58 MB + server 338–409 MiB |
+
+At this size HelixDB gives the same answers and is slower; its use is graphs that outgrow one process's tables and
+walks SQL does badly. The production set has about seven times these edges (2.5 million); filling and memory there
+are not measured.
+
 ## Graph view and section labels
 
 The graph view (`/ui`) draws **sections** (the chunks of one heading or page, `<source>:<path>#<section>`)

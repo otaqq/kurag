@@ -6,6 +6,9 @@
 //!   merged by RRF. A hit in both lists comes first; on a tie the vector hit wins. Every hybrid hit carries
 //!   vector_score (computed for hits only the text search found), so a client can keep a similarity threshold.
 //! - graph: adds up to n chunks linked to the hits; they score hit score x edge weight and carry `via`.
+//! - kg (hybrid only): the entities named in the query (`kg::find`), walked `kg` steps along their relations, give
+//!   the chunks that mention them, ranked by cosine similarity to the query: a third list in the RRF. Walked in
+//!   the graph backend when there is one (`GraphStore`), else in the namespace's tables.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -14,6 +17,16 @@ use kurag_core::score::{self, HYBRID_MIN_COVERAGE};
 use kurag_core::types::{Hit, Mode, Search};
 
 use crate::store::{Namespace, Result};
+
+/// Entities found by name in the query that start a knowledge-graph walk, per namespace.
+const KG_START: usize = 10;
+
+#[derive(Clone, Copy)]
+enum List {
+    Vector,
+    Text,
+    Kg,
+}
 
 #[derive(Default)]
 struct Merged {
@@ -29,8 +42,15 @@ pub fn run(spaces: &[Arc<Namespace>], req: &Search, q: Option<&[f32]>) -> Result
     let want = if req.mode == Mode::Hybrid { (req.limit * 2).max(10) } else { req.limit };
     let mut vec_hits: Vec<(f64, usize, i64)> = Vec::new();
     let mut text_hits: Vec<(f64, usize, i64)> = Vec::new();
+    let mut kg_hits: Vec<(f64, usize, i64)> = Vec::new();
     for (i, ns) in spaces.iter().enumerate() {
-        let inner = ns.lock();
+        let mut inner = ns.lock();
+        if req.kg > 0 {
+            for (vid, n) in inner.kg_chunks(&req.query, req.kg, KG_START)? {
+                let s = q.and_then(|q| inner.similarity(q, vid)).unwrap_or(n as f64);
+                kg_hits.push((s, i, vid));
+            }
+        }
         if let Some(q) = q {
             vec_hits.extend(inner.vector_search(q, want)?.into_iter().map(|(vid, s)| (s, i, vid)));
         }
@@ -43,21 +63,25 @@ pub fn run(spaces: &[Arc<Namespace>], req: &Search, q: Option<&[f32]>) -> Result
             );
         }
     }
-    for hits in [&mut vec_hits, &mut text_hits] {
+    for hits in [&mut vec_hits, &mut text_hits, &mut kg_hits] {
         hits.sort_by(|a, b| b.0.total_cmp(&a.0));
         hits.truncate(want);
     }
 
     let mut merged: Vec<Merged> = Vec::new();
     let mut at: HashMap<(usize, i64), usize> = HashMap::new();
-    for (is_vector, hits) in [(true, &vec_hits), (false, &text_hits)] {
+    for (list, hits) in [(List::Vector, &vec_hits), (List::Text, &text_hits), (List::Kg, &kg_hits)] {
         for (rank, &(s, space, vid)) in hits.iter().enumerate() {
             let k = *at.entry((space, vid)).or_insert_with(|| {
                 merged.push(Merged { space, vid, ..Default::default() });
                 merged.len() - 1
             });
             let m = &mut merged[k];
-            if is_vector { m.vector = Some(s) } else { m.text = Some(s) }
+            match list {
+                List::Vector => m.vector = Some(s),
+                List::Text => m.text = Some(s),
+                List::Kg => {}
+            }
             m.rrf += score::rrf(rank);
         }
     }

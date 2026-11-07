@@ -15,7 +15,7 @@ use serde_json::{Map, Value, json};
 use crate::config::Config;
 use crate::embed::Embedder;
 use crate::store::{self, Namespace, Store};
-use crate::{kg, search, sections};
+use crate::{kg, search};
 
 pub struct App {
     pub cfg: Config,
@@ -222,16 +222,7 @@ async fn search_route(State(app): S, Json(req): Json<Search>) -> Answer<Vec<Hit>
 async fn kg_upsert(State(app): S, Json(req): Json<KgUpsert>) -> Answer<Value> {
     blocking(move || {
         let ns = app.store.get(&req.namespace, true)?.expect("created");
-        let inner = ns.lock();
-        let tx = inner.db.unchecked_transaction()?;
-        // the sections' labels may show these entities
-        let chunks: Vec<&str> = req.done.iter().map(String::as_str)
-            .chain(req.mentions.iter().map(|m| m.chunk.as_str()))
-            .chain(req.relations.iter().map(|r| r.chunk.as_str()).filter(|c| !c.is_empty()))
-            .collect();
-        sections::forget_chunks(&tx, &chunks)?;
-        let c = kg::upsert(&tx, &req)?;
-        tx.commit()?;
+        let c = ns.lock().kg_upsert(&req)?;
         Ok(Json(json!({"namespace": req.namespace, "entities": c.entities, "relations": c.relations,
                        "mentions": c.mentions, "done": c.done})))
     })
@@ -255,12 +246,8 @@ async fn kg_delete(State(app): S, Json(req): Json<Delete>) -> Answer<Value> {
         let (Some(ns), false) = (ns, prefixes.is_empty()) else {
             return Ok(Json(json!({"namespace": req.namespace, "relations": 0, "mentions": 0, "entities": 0})));
         };
-        let inner = ns.lock();
-        let tx = inner.db.unchecked_transaction()?;
         let ranges: Vec<_> = prefixes.iter().map(|p| ids::prefix_range(p)).collect();
-        sections::forget_ranges(&tx, &ranges)?;
-        let (relations, mentions, entities) = kg::delete(&tx, &ranges)?;
-        tx.commit()?;
+        let (relations, mentions, entities) = ns.lock().kg_delete(&ranges)?;
         Ok(Json(json!({"namespace": req.namespace, "relations": relations, "mentions": mentions, "entities": entities})))
     })
     .await
@@ -271,12 +258,12 @@ async fn kg_search(State(app): S, Json(req): Json<KgSearch>) -> Answer<Value> {
     blocking(move || {
         let (mut entities, mut relations) = (Vec::new(), Vec::new());
         for ns in spaces(&app, req.namespaces.as_deref(), req.exclude.as_deref(), false)? {
-            let inner = ns.lock();
+            let mut inner = ns.lock();
             let found = kg::find(&inner.db, &req.query, req.limit)?;
             if found.is_empty() {
                 continue;
             }
-            let around = kg::around(&inner.db, &found, req.depth, req.limit * 5)?;
+            let around = inner.kg_around(&found, req.depth, req.limit * 5)?;
             entities.extend(around.entities.into_iter().map(|(name, kind, description, chunks)| KgEntity {
                 namespace: ns.name.clone(),
                 name,

@@ -26,6 +26,10 @@ pub struct Config {
     pub vector_backend: String,
     /// `VECTOR_URL`: the txtai service or HelixDB server, for those backends
     pub vector_url: Option<String>,
+    /// `GRAPH_BACKEND`: sqlite (default) or helixdb, where similarity edges and the knowledge graph are walked
+    pub graph_backend: String,
+    /// `GRAPH_URL`: the HelixDB server, for that backend
+    pub graph_url: Option<String>,
     /// `UI_USER`, `UI_PASSWORD`: the graph view's login (Basic auth); without a password there is no `/ui`
     #[cfg_attr(not(feature = "ui"), allow(dead_code))]
     pub ui_user: String,
@@ -59,6 +63,8 @@ impl Config {
             edge_min: parsed("EDGE_MIN", 0.4)?,
             vector_backend: var("VECTOR_BACKEND").unwrap_or_default(),
             vector_url: var("VECTOR_URL"),
+            graph_backend: var("GRAPH_BACKEND").unwrap_or_default(),
+            graph_url: var("GRAPH_URL"),
             ui_user: var("UI_USER").unwrap_or_default(),
             ui_password: var("UI_PASSWORD"),
         })

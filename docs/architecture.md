@@ -11,8 +11,8 @@ route, and the graph view (`/ui`, the txtai-kura view ported, nodes labelled wit
 and section labels"). It passes the contract tests, as txtai-kura does. Differences from the plan below, for now:
 
 - **Settings from the environment only** (`LISTEN`, `DATA_DIR`, `API_KEY`, `EMBED_URL`, `EMBED_MODEL`,
-  `EMBED_API_KEY`, `EMBED_BATCH`, `EDGE_NEIGHBOURS`, `EDGE_MIN`, `VECTOR_BACKEND`, `VECTOR_URL`, `UI_USER`,
-  `UI_PASSWORD`); the TOML file comes later. Without `UI_PASSWORD` there is no `/ui`.
+  `EMBED_API_KEY`, `EMBED_BATCH`, `EDGE_NEIGHBOURS`, `EDGE_MIN`, `VECTOR_BACKEND`, `VECTOR_URL`, `GRAPH_BACKEND`,
+  `GRAPH_URL`, `UI_USER`, `UI_PASSWORD`); the TOML file comes later. Without `UI_PASSWORD` there is no `/ui`.
 - **The UI is plain files** (`ui/`: HTML, JavaScript, CSS and Cytoscape.js 3.30.2 in `ui/vendor/`), built into the
   binary with the cargo feature `ui` (on by default), behind a Basic login. No build step and no request to a CDN.
   It is read-only: search, hubs, sections around one, the text of a section; the knowledge-graph view comes later.
@@ -24,6 +24,9 @@ and section labels"). It passes the contract tests, as txtai-kura does. Differen
   graph stay in SQLite for every backend; the external index is filled from the float16 copies (search.md, "Vector
   index backends", with measurements). The other parts of the planned trait (full text, graph) are cut out when an
   engine is used for them.
+- **A second backend trait for graphs** (`GraphStore` in `backend.rs`): `GRAPH_BACKEND=sqlite` (default) walks the
+  namespace's tables, `helixdb` a copy in a HelixDB server kept at the tables' `graph_version` (search.md, "Graph
+  backends"). `/search` takes `kg: n` (hybrid only) to fuse the chunks the knowledge graph reaches from the query.
 - **One embedding URL**; no failover list or external picker yet.
 - **`kurag-sync` has extraction only** (`kurag-sync extract`, crate `crates/kurag-sync`): the port of
   txtai-kura-sync 0.4.1's `extract`, with the same command line, config keys, prompt, answer schema and limits (a
@@ -123,7 +126,7 @@ flowchart LR
 | `Backend` | core | The trait each storage engine implements (design.md, "Backend trait") |
 | `http` | server | axum routes, API key, UI login, static UI files |
 | `sections` | server | The graph view's sections: links, hubs, keyword labels (search.md) |
-| `backend` | server | External vector indexes (txtai, HelixDB) behind one trait, filled from the stored copies |
+| `backend` | server | External vector indexes (txtai, HelixDB) and graph stores (HelixDB) behind two traits, filled from the tables |
 | `search` | server | Picks namespaces, embeds the query once, asks each namespace, merges |
 | `write` | server | Embeds outside the namespace lock, then writes in one transaction |
 | `namespaces` | server | Opens a namespace on first use, one lock each, closes idle ones to free memory |
