@@ -62,7 +62,7 @@ jobs:
       - run: docker run --rm kurag:ci --version
       - run: docker run --rm --entrypoint /usr/local/bin/kurag-sync kurag:ci --version
       - run: docker build -t kurag-txtai:ci backends/txtai
-      - run: docker run --rm kurag-txtai:ci python -c "import server"
+      - run: docker run --rm --entrypoint /usr/bin/python3 kurag-txtai:ci -c "import server"
 
   # The Helm chart: lint, render with every optional part on (ci/test-values.yaml), validate against the Kubernetes
   # schemas, and check that the chart follows the version in Cargo.toml
