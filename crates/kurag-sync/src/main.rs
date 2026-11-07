@@ -68,7 +68,12 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             Some((n, v)) if n.starts_with("--") => (n, Some(v.to_string())),
             _ => (arg.as_str(), None),
         };
-        let mut value = || inline.clone().or_else(|| it.next().cloned()).ok_or(format!("{name} needs a value"));
+        let mut value = || {
+            inline
+                .clone()
+                .or_else(|| it.next().cloned())
+                .ok_or(format!("{name} needs a value"))
+        };
         let number = |v: String| v.parse::<f64>().map_err(|_| format!("{name}: not a number: {v}"));
         match name {
             "--config" => a.config = Some(value()?.into()),
@@ -151,11 +156,17 @@ fn setup(a: &Args) -> Result<Setup, String> {
     let key_env = config::string(rag_cfg, "api_key_env").unwrap_or_else(|| "RAG_API_KEY".into());
     let rag = sync::Rag::new(&url, env.get(&key_env).map_or("", String::as_str));
     let data = a.data.clone().unwrap_or_else(|| {
-        let base = std::env::var_os("XDG_STATE_HOME").map(PathBuf::from)
+        let base = std::env::var_os("XDG_STATE_HOME")
+            .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/state"));
         base.join("kurag-sync")
     });
-    Ok(Setup { sources: sync::Sources::new(cfg)?, env, paths: sync::Paths::new(&data), rag })
+    Ok(Setup {
+        sources: sync::Sources::new(cfg)?,
+        env,
+        paths: sync::Paths::new(&data),
+        rag,
+    })
 }
 
 fn sync_command(cmd: &str, a: Args) -> i32 {
@@ -206,15 +217,37 @@ fn sync_command(cmd: &str, a: Args) -> i32 {
             }
         }
     }
-    let started = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
-    let mut args = sync::RunArgs { only: a.source.as_deref(), kind: a.kind.as_deref(), names: None, under: a.namespace.as_deref(), dry: a.dry_run };
+    let started = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0);
+    let mut args = sync::RunArgs {
+        only: a.source.as_deref(),
+        kind: a.kind.as_deref(),
+        names: None,
+        under: a.namespace.as_deref(),
+        dry: a.dry_run,
+    };
     if a.due {
         let names = sync::due(&s.sources, &s.paths, started);
-        log(&format!("due: {}", if names.is_empty() { "nothing".to_string() } else { names.join(", ") }));
+        log(&format!(
+            "due: {}",
+            if names.is_empty() {
+                "nothing".to_string()
+            } else {
+                names.join(", ")
+            }
+        ));
         if names.is_empty() {
             return 0;
         }
-        args = sync::RunArgs { only: None, kind: None, names: Some(names.clone()), under: None, dry: a.dry_run };
+        args = sync::RunArgs {
+            only: None,
+            kind: None,
+            names: Some(names.clone()),
+            under: None,
+            dry: a.dry_run,
+        };
         return match sync::run(&s.sources, &s.env, &s.paths, &s.rag, &args) {
             Ok(rc) => {
                 if rc == 0 && !a.dry_run {
@@ -232,7 +265,11 @@ fn sync_command(cmd: &str, a: Args) -> i32 {
         Ok(rc) => {
             // a full or a kind run also counts for --due (not a part of one namespace)
             if rc == 0 && !a.dry_run && a.namespace.is_none() {
-                sync::mark_runs(&s.paths, &sync::ran(&s.sources, a.source.as_deref(), a.kind.as_deref()), started);
+                sync::mark_runs(
+                    &s.paths,
+                    &sync::ran(&s.sources, a.source.as_deref(), a.kind.as_deref()),
+                    started,
+                );
             }
             rc
         }
@@ -262,9 +299,17 @@ fn extract_command(a: Args) -> i32 {
         return 2;
     };
     let model = a.model.clone().or_else(|| config::string(x, "model"));
-    let key_env = a.api_key_env.clone().or_else(|| config::string(x, "api_key_env")).unwrap_or_default();
+    let key_env = a
+        .api_key_env
+        .clone()
+        .or_else(|| config::string(x, "api_key_env"))
+        .unwrap_or_default();
     let key = env.get(&key_env).cloned().unwrap_or_default();
-    let mode_name = a.json_mode.clone().or_else(|| config::string(x, "json_mode")).unwrap_or_else(|| "schema".into());
+    let mode_name = a
+        .json_mode
+        .clone()
+        .or_else(|| config::string(x, "json_mode"))
+        .unwrap_or_else(|| "schema".into());
     let Some(mode) = JsonMode::parse(&mode_name) else {
         log("error: json_mode is one of schema, object, none");
         return 2;
@@ -287,7 +332,11 @@ fn extract_command(a: Args) -> i32 {
             Some(toml::Value::Array(v)) => v.iter().filter_map(|b| b.as_str().map(str::to_string)).collect(),
             _ => Vec::new(),
         };
-        let list = if a.api_base.is_empty() { from_cfg } else { a.api_base.clone() };
+        let list = if a.api_base.is_empty() {
+            from_cfg
+        } else {
+            a.api_base.clone()
+        };
         if list.is_empty() {
             log("error: extract needs --api-base and --model (or api_base / model in [extract])");
             return 2;
@@ -300,10 +349,17 @@ fn extract_command(a: Args) -> i32 {
     };
     let rag_key_env = config::string(rag_cfg, "api_key_env").unwrap_or_else(|| "RAG_API_KEY".into());
     let rag = Rag::new(&url, env.get(&rag_key_env).map_or("", String::as_str));
-    let int = |k: &str| x.and_then(|t| t.get(k)).and_then(|v| v.as_integer().map(|i| i as f64).or_else(|| v.as_float()));
+    let int = |k: &str| {
+        x.and_then(|t| t.get(k))
+            .and_then(|v| v.as_integer().map(|i| i as f64).or_else(|| v.as_float()))
+    };
     let settings = Settings {
         namespace,
-        parallel: a.parallel.or_else(|| int("parallel").map(|p| p as usize)).unwrap_or(1).max(1),
+        parallel: a
+            .parallel
+            .or_else(|| int("parallel").map(|p| p as usize))
+            .unwrap_or(1)
+            .max(1),
         minutes: a.minutes.or_else(|| int("minutes")),
         limit: a.limit,
         dry_run: a.dry_run,
@@ -325,14 +381,18 @@ mod tests {
 
     #[test]
     fn arguments() {
-        let v: Vec<String> = "--config k.toml --data d --env-file e extract --namespace it --model m --api-bases-file b \
+        let v: Vec<String> =
+            "--config k.toml --data d --env-file e extract --namespace it --model m --api-bases-file b \
                               --parallel 2 --minutes=1.5 --dry-run"
-            .split_whitespace()
-            .map(String::from)
-            .collect();
+                .split_whitespace()
+                .map(String::from)
+                .collect();
         let a = parse_args(&v).unwrap();
         assert_eq!(a.command.as_deref(), Some("extract"));
-        assert_eq!((a.namespace.as_deref(), a.parallel, a.minutes, a.dry_run), (Some("it"), Some(2), Some(1.5), true));
+        assert_eq!(
+            (a.namespace.as_deref(), a.parallel, a.minutes, a.dry_run),
+            (Some("it"), Some(2), Some(1.5), true)
+        );
         assert_eq!(a.api_bases_file, Some(PathBuf::from("b")));
         assert!(parse_args(&["--bogus".to_string()]).is_err());
         assert!(parse_args(&["--model".to_string()]).is_err());

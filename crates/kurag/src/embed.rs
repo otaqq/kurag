@@ -27,7 +27,10 @@ struct Item {
 impl Embedder {
     pub fn new(cfg: &Config) -> Embedder {
         Embedder {
-            http: reqwest::Client::builder().timeout(std::time::Duration::from_secs(300)).build().expect("http client"),
+            http: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(300))
+                .build()
+                .expect("http client"),
             url: format!("{}/embeddings", cfg.embed_url.trim_end_matches('/')),
             model: cfg.embed_model.clone(),
             key: cfg.embed_api_key.clone(),
@@ -39,7 +42,10 @@ impl Embedder {
     pub async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, String> {
         let mut out = Vec::with_capacity(texts.len());
         for part in texts.chunks(self.batch) {
-            let mut req = self.http.post(&self.url).json(&json!({"model": self.model, "input": part}));
+            let mut req = self
+                .http
+                .post(&self.url)
+                .json(&json!({"model": self.model, "input": part}));
             if let Some(k) = &self.key {
                 req = req.bearer_auth(k);
             }
@@ -47,11 +53,18 @@ impl Embedder {
             let status = r.status();
             if !status.is_success() {
                 let body = r.text().await.unwrap_or_default();
-                return Err(format!("embedding API: {status}: {}", body.chars().take(300).collect::<String>()));
+                return Err(format!(
+                    "embedding API: {status}: {}",
+                    body.chars().take(300).collect::<String>()
+                ));
             }
             let mut answer: Answer = r.json().await.map_err(|e| format!("embedding API answer: {e}"))?;
             if answer.data.len() != part.len() {
-                return Err(format!("embedding API: {} vectors for {} texts", answer.data.len(), part.len()));
+                return Err(format!(
+                    "embedding API: {} vectors for {} texts",
+                    answer.data.len(),
+                    part.len()
+                ));
             }
             answer.data.sort_by_key(|i| i.index);
             out.extend(answer.data.into_iter().map(|i| normalize(i.embedding)));

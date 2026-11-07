@@ -39,7 +39,11 @@ struct Merged {
 
 /// Runs the search over the given namespaces (`q`: the embedded query, for vector and hybrid).
 pub fn run(spaces: &[Arc<Namespace>], req: &Search, q: Option<&[f32]>) -> Result<Vec<Hit>> {
-    let want = if req.mode == Mode::Hybrid { (req.limit * 2).max(10) } else { req.limit };
+    let want = if req.mode == Mode::Hybrid {
+        (req.limit * 2).max(10)
+    } else {
+        req.limit
+    };
     let mut vec_hits: Vec<(f64, usize, i64)> = Vec::new();
     let mut text_hits: Vec<(f64, usize, i64)> = Vec::new();
     let mut kg_hits: Vec<(f64, usize, i64)> = Vec::new();
@@ -70,10 +74,18 @@ pub fn run(spaces: &[Arc<Namespace>], req: &Search, q: Option<&[f32]>) -> Result
 
     let mut merged: Vec<Merged> = Vec::new();
     let mut at: HashMap<(usize, i64), usize> = HashMap::new();
-    for (list, hits) in [(List::Vector, &vec_hits), (List::Text, &text_hits), (List::Kg, &kg_hits)] {
+    for (list, hits) in [
+        (List::Vector, &vec_hits),
+        (List::Text, &text_hits),
+        (List::Kg, &kg_hits),
+    ] {
         for (rank, &(s, space, vid)) in hits.iter().enumerate() {
             let k = *at.entry((space, vid)).or_insert_with(|| {
-                merged.push(Merged { space, vid, ..Default::default() });
+                merged.push(Merged {
+                    space,
+                    vid,
+                    ..Default::default()
+                });
                 merged.len() - 1
             });
             let m = &mut merged[k];
@@ -90,7 +102,11 @@ pub fn run(spaces: &[Arc<Namespace>], req: &Search, q: Option<&[f32]>) -> Result
         Mode::Text => m.text.unwrap_or(0.0),
         Mode::Hybrid => m.rrf,
     };
-    merged.sort_by(|a, b| key(b).total_cmp(&key(a)).then(b.vector.is_some().cmp(&a.vector.is_some())));
+    merged.sort_by(|a, b| {
+        key(b)
+            .total_cmp(&key(a))
+            .then(b.vector.is_some().cmp(&a.vector.is_some()))
+    });
     merged.truncate(req.limit);
 
     // text-only hybrid hits get their cosine similarity too
@@ -108,7 +124,9 @@ pub fn run(spaces: &[Arc<Namespace>], req: &Search, q: Option<&[f32]>) -> Result
         }
         let rows = ns.lock().chunks(&mine.iter().map(|m| m.vid).collect::<Vec<_>>())?;
         for m in mine {
-            let Some((id, source, text)) = rows.get(&m.vid) else { continue };
+            let Some((id, source, text)) = rows.get(&m.vid) else {
+                continue;
+            };
             let hybrid = req.mode == Mode::Hybrid;
             out.push((
                 Hit {
@@ -136,7 +154,12 @@ pub fn run(spaces: &[Arc<Namespace>], req: &Search, q: Option<&[f32]>) -> Result
 }
 
 /// Chunks linked to the hits; a neighbour scores hit score x edge weight.
-fn expand_graph(spaces: &[Arc<Namespace>], hits: &[(Hit, usize, i64)], n: usize, min_weight: f64) -> Result<Vec<(Hit, usize, i64)>> {
+fn expand_graph(
+    spaces: &[Arc<Namespace>],
+    hits: &[(Hit, usize, i64)],
+    n: usize,
+    min_weight: f64,
+) -> Result<Vec<(Hit, usize, i64)>> {
     let by_vid: HashMap<(usize, i64), &Hit> = hits.iter().map(|(h, s, v)| ((*s, *v), h)).collect();
     // (space, vid) -> (score, via); insertion order kept for ties
     let mut extra: Vec<((usize, i64), f64, String)> = Vec::new();

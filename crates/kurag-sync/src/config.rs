@@ -24,7 +24,11 @@ pub fn load(path: &Path) -> Result<Table, String> {
         if let Some(Value::Array(more)) = extra.get("source") {
             let names: Vec<String> = more.iter().filter_map(name_of).collect();
             let mut list: Vec<Value> = match cfg.get("source") {
-                Some(Value::Array(a)) => a.iter().filter(|s| !name_of(s).is_some_and(|n| names.contains(&n))).cloned().collect(),
+                Some(Value::Array(a)) => a
+                    .iter()
+                    .filter(|s| !name_of(s).is_some_and(|n| names.contains(&n)))
+                    .cloned()
+                    .collect(),
                 _ => Vec::new(),
             };
             list.extend(more.iter().cloned());
@@ -64,7 +68,10 @@ pub fn load_env(path: &Path) -> HashMap<String, String> {
                 continue;
             }
             if let Some((k, v)) = line.split_once('=') {
-                env.insert(k.trim().to_string(), v.trim().trim_matches(|c| c == '\'' || c == '"').to_string());
+                env.insert(
+                    k.trim().to_string(),
+                    v.trim().trim_matches(|c| c == '\'' || c == '"').to_string(),
+                );
             }
         }
     }
@@ -79,15 +86,28 @@ mod tests {
     fn local_file_and_env() {
         let dir = std::env::temp_dir().join(format!("kurag-sync-config-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("kura.toml"), "[rag]\nurl = \"http://a\"\napi_key_env = \"K\"\n[extract]\nmodel = \"m\"\n").unwrap();
-        std::fs::write(dir.join("kura.local.toml"), "[rag]\nurl = \"http://b\"\n[[source]]\nname = \"a\"\nkind = \"local\"\n\
-                                                    [[source]]\nname = \"c\"\n").unwrap();
+        std::fs::write(
+            dir.join("kura.toml"),
+            "[rag]\nurl = \"http://a\"\napi_key_env = \"K\"\n[extract]\nmodel = \"m\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("kura.local.toml"),
+            "[rag]\nurl = \"http://b\"\n[[source]]\nname = \"a\"\nkind = \"local\"\n\
+                                                    [[source]]\nname = \"c\"\n",
+        )
+        .unwrap();
         std::fs::write(dir.join(".env"), "# c\nK='secret'\n\nX = 1\n").unwrap();
         let mut shared = std::fs::read_to_string(dir.join("kura.toml")).unwrap();
         shared.push_str("[[source]]\nname = \"a\"\n[[source]]\nname = \"b\"\n");
         std::fs::write(dir.join("kura.toml"), shared).unwrap();
         let cfg = load(&dir.join("kura.toml")).unwrap();
-        let names: Vec<&str> = cfg["source"].as_array().unwrap().iter().map(|s| s["name"].as_str().unwrap()).collect();
+        let names: Vec<&str> = cfg["source"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["name"].as_str().unwrap())
+            .collect();
         assert_eq!(names, ["b", "a", "c"]);
         assert_eq!(cfg["source"][1]["kind"].as_str(), Some("local"));
         assert_eq!(string(table(&cfg, "rag"), "url").as_deref(), Some("http://b"));

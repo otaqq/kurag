@@ -41,7 +41,10 @@ pub struct Paths {
 
 impl Paths {
     pub fn new(data: &Path) -> Paths {
-        Paths { state: data.join("state"), cache: data.join("cache") }
+        Paths {
+            state: data.join("state"),
+            cache: data.join("cache"),
+        }
     }
     fn state_file(&self) -> PathBuf {
         self.state.join("state.json")
@@ -88,13 +91,25 @@ impl Sources {
         if let Some(v) = crate::config::string(text, "source") {
             words.source = v;
         }
-        let walls = cfg.get("walls").and_then(Toml::as_array).map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        let walls = cfg
+            .get("walls")
+            .and_then(Toml::as_array)
+            .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
             .unwrap_or_default();
-        Ok(Sources { cfg, disabled, words, walls })
+        Ok(Sources {
+            cfg,
+            disabled,
+            words,
+            walls,
+        })
     }
 
     pub fn list(&self) -> Vec<&Table> {
-        self.cfg.get("source").and_then(Toml::as_array).map(|a| a.iter().filter_map(Toml::as_table).collect()).unwrap_or_default()
+        self.cfg
+            .get("source")
+            .and_then(Toml::as_array)
+            .map(|a| a.iter().filter_map(Toml::as_table).collect())
+            .unwrap_or_default()
     }
 }
 
@@ -116,7 +131,12 @@ fn is_namespace(n: &str) -> bool {
     for seg in n.split('.') {
         let mut c = seg.chars();
         match c.next() {
-            Some(x) if (if first { x.is_ascii_lowercase() } else { x.is_ascii_lowercase() || x.is_ascii_digit() }) => {}
+            Some(x)
+                if (if first {
+                    x.is_ascii_lowercase()
+                } else {
+                    x.is_ascii_lowercase() || x.is_ascii_digit()
+                }) => {}
             _ => return false,
         }
         if !c.all(|x| x.is_ascii_lowercase() || x.is_ascii_digit() || x == '-') {
@@ -129,7 +149,9 @@ fn is_namespace(n: &str) -> bool {
 
 /// "fnmatch, where a leading "**/" may also match nothing ("**/*.pdf" matches "a.pdf" as well as "x/a.pdf")."
 fn matches(rel: &str, patterns: &[String]) -> bool {
-    patterns.iter().any(|p| fnmatch(rel, p) || (p.starts_with("**/") && fnmatch(rel, &p[3..])))
+    patterns
+        .iter()
+        .any(|p| fnmatch(rel, p) || (p.starts_with("**/") && fnmatch(rel, &p[3..])))
 }
 
 fn posix(p: &Path) -> String {
@@ -138,7 +160,12 @@ fn posix(p: &Path) -> String {
 
 /// {relative path: path} of the files under root matching include and not exclude (like os.walk: .git folders and
 /// symlinked folders are not entered). Folders holding a .rag.toml are added to markers.
-fn collect(root: &Path, include: &[String], exclude: &[String], mut markers: Option<&mut HashSet<PathBuf>>) -> BTreeMap<String, PathBuf> {
+fn collect(
+    root: &Path,
+    include: &[String],
+    exclude: &[String],
+    mut markers: Option<&mut HashSet<PathBuf>>,
+) -> BTreeMap<String, PathBuf> {
     let mut files = BTreeMap::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(folder) = stack.pop() {
@@ -147,7 +174,8 @@ fn collect(root: &Path, include: &[String], exclude: &[String], mut markers: Opt
             let name = entry.file_name().to_string_lossy().into_owned();
             let path = folder.join(&name);
             let Ok(ft) = entry.file_type() else { continue };
-            let is_dir = ft.is_dir() || (ft.is_symlink() && std::fs::metadata(&path).map(|m| m.is_dir()).unwrap_or(false));
+            let is_dir =
+                ft.is_dir() || (ft.is_symlink() && std::fs::metadata(&path).map(|m| m.is_dir()).unwrap_or(false));
             if is_dir {
                 if name != ".git" && !ft.is_symlink() {
                     stack.push(path);
@@ -200,7 +228,15 @@ impl<'a> Folders<'a> {
             }
         }
         let wall = map.iter().find_map(|(ns, _)| wall_of(ns, walls));
-        Folders { name: s(src, "name").unwrap_or("").into(), wall, walls, mapped, configs: HashMap::new(), markers: HashSet::new(), bad: 0 }
+        Folders {
+            name: s(src, "name").unwrap_or("").into(),
+            wall,
+            walls,
+            mapped,
+            configs: HashMap::new(),
+            markers: HashSet::new(),
+            bad: 0,
+        }
     }
 
     fn config(&mut self, folder: &Path) -> Option<&Result<FolderCfg, ()>> {
@@ -208,14 +244,19 @@ impl<'a> Folders<'a> {
             let mut got = None;
             if self.markers.contains(folder) {
                 let path = folder.join(FOLDER_CONFIG);
-                let parsed = std::fs::read_to_string(&path).map_err(|e| e.to_string())
+                let parsed = std::fs::read_to_string(&path)
+                    .map_err(|e| e.to_string())
                     .and_then(|t| t.parse::<Table>().map_err(|e| e.to_string()))
                     .and_then(|t| self.check(&t));
                 got = Some(match parsed {
                     Ok(c) => Ok(c),
                     Err(problem) => {
                         self.bad += 1;
-                        log(&format!("{}: {}: {problem}; the files under it are not read", self.name, path.display()));
+                        log(&format!(
+                            "{}: {}: {problem}; the files under it are not read",
+                            self.name,
+                            path.display()
+                        ));
                         Err(())
                     }
                 });
@@ -228,7 +269,10 @@ impl<'a> Folders<'a> {
     /// The settings of a .rag.toml, or what is wrong with it. Only namespace (or shelf) and [[file]] (path,
     /// namespace or shelf) may be set.
     fn check(&self, t: &Table) -> Result<FolderCfg, String> {
-        let unknown: Vec<&String> = t.keys().filter(|k| !["namespace", "shelf", "file"].contains(&k.as_str())).collect();
+        let unknown: Vec<&String> = t
+            .keys()
+            .filter(|k| !["namespace", "shelf", "file"].contains(&k.as_str()))
+            .collect();
         if !unknown.is_empty() {
             return Err(format!("unknown keys {unknown:?} (only namespace and [[file]])"));
         }
@@ -243,7 +287,9 @@ impl<'a> Folders<'a> {
         let namespace = ns_of(t)?;
         let mut files = Vec::new();
         for f in t.get("file").and_then(Toml::as_array).map(Vec::as_slice).unwrap_or(&[]) {
-            let Some(f) = f.as_table() else { return Err("each [[file]] needs path and namespace, nothing else".into()) };
+            let Some(f) = f.as_table() else {
+                return Err("each [[file]] needs path and namespace, nothing else".into());
+            };
             let extra = f.keys().any(|k| !["path", "namespace", "shelf"].contains(&k.as_str()));
             match (s(f, "path"), ns_of(f)?) {
                 (Some(p), Some(ns)) if !extra => files.push((p.to_string(), ns)),
@@ -276,7 +322,10 @@ impl<'a> Folders<'a> {
                     let rel = posix(path.strip_prefix(&folder).unwrap_or(path));
                     for (pat, ns) in &c.files {
                         if matches(&rel, std::slice::from_ref(pat)) {
-                            return (Some(ns.clone()), format!("{} [[file]] {pat}", folder.join(FOLDER_CONFIG).display()));
+                            return (
+                                Some(ns.clone()),
+                                format!("{} [[file]] {pat}", folder.join(FOLDER_CONFIG).display()),
+                            );
                         }
                     }
                     if let Some(ns) = &c.namespace {
@@ -304,29 +353,55 @@ fn wall_of(ns: &str, walls: &[String]) -> Option<String> {
 /// The map of a shelf source ([source.map], in its order), or of a shelves source (its folders).
 fn shelf_map(src: &Table) -> Result<Vec<(String, Vec<String>)>, String> {
     if s(src, "type") == Some("shelves") {
-        let Some(path) = s(src, "path") else { return Err("a shelves source needs path".into()) };
+        let Some(path) = s(src, "path") else {
+            return Err("a shelves source needs path".into());
+        };
         let root = Path::new(path);
-        let mut names: Vec<String> = std::fs::read_dir(root).map(|rd| {
-            rd.flatten().filter(|e| e.path().is_dir()).map(|e| e.file_name().to_string_lossy().into_owned())
-                .filter(|n| is_namespace(n)).collect()
-        }).unwrap_or_default();
+        let mut names: Vec<String> = std::fs::read_dir(root)
+            .map(|rd| {
+                rd.flatten()
+                    .filter(|e| e.path().is_dir())
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .filter(|n| is_namespace(n))
+                    .collect()
+            })
+            .unwrap_or_default();
         names.sort();
         if let Some(only) = s(src, "only") {
-            let (keep, skipped): (Vec<String>, Vec<String>) = names.into_iter().partition(|n| format!(".{n}.").contains(&format!(".{only}.")));
+            let (keep, skipped): (Vec<String>, Vec<String>) = names
+                .into_iter()
+                .partition(|n| format!(".{n}.").contains(&format!(".{only}.")));
             if !skipped.is_empty() {
-                log(&format!("{}: folders without .{only}. in the name, skipped: {}", s(src, "name").unwrap_or(""), skipped.join(", ")));
+                log(&format!(
+                    "{}: folders without .{only}. in the name, skipped: {}",
+                    s(src, "name").unwrap_or(""),
+                    skipped.join(", ")
+                ));
             }
             names = keep;
         }
         let pre = s(src, "prefix").map(|p| format!("{p}.")).unwrap_or_default();
-        return Ok(names.into_iter().map(|n| (format!("{pre}{n}"), vec![posix(&root.join(&n))])).collect());
+        return Ok(names
+            .into_iter()
+            .map(|n| (format!("{pre}{n}"), vec![posix(&root.join(&n))]))
+            .collect());
     }
-    let Some(map) = src.get("map").and_then(Toml::as_table) else { return Err("a shelf source needs [source.map]".into()) };
-    Ok(map.iter().map(|(ns, v)| (ns.clone(), match v {
-        Toml::String(x) => vec![x.clone()],
-        Toml::Array(a) => a.iter().filter_map(|x| x.as_str().map(String::from)).collect(),
-        _ => vec![],
-    })).collect())
+    let Some(map) = src.get("map").and_then(Toml::as_table) else {
+        return Err("a shelf source needs [source.map]".into());
+    };
+    Ok(map
+        .iter()
+        .map(|(ns, v)| {
+            (
+                ns.clone(),
+                match v {
+                    Toml::String(x) => vec![x.clone()],
+                    Toml::Array(a) => a.iter().filter_map(|x| x.as_str().map(String::from)).collect(),
+                    _ => vec![],
+                },
+            )
+        })
+        .collect())
 }
 
 type Origins = BTreeMap<String, (Option<String>, String)>;
@@ -334,8 +409,13 @@ type Origins = BTreeMap<String, (Option<String>, String)>;
 /// A shelf source's files: ({key: file}, key -> namespace, errors). Keys are the files' absolute paths without the
 /// leading "/", so files of different folders never collide. origins, if given, gets {key: (namespace or None,
 /// which setting decided it)} for `kurag-sync shelves`.
-fn shelf_files(src: &Table, include: &[String], exclude: &[String], walls: &[String], mut origins: Option<&mut Origins>)
-    -> (BTreeMap<String, PathBuf>, HashMap<String, String>, usize) {
+fn shelf_files(
+    src: &Table,
+    include: &[String],
+    exclude: &[String],
+    walls: &[String],
+    mut origins: Option<&mut Origins>,
+) -> (BTreeMap<String, PathBuf>, HashMap<String, String>, usize) {
     let (mut files, mut namespace, mut bad) = (BTreeMap::new(), HashMap::new(), 0);
     let map = match shelf_map(src) {
         Ok(m) => m,
@@ -386,10 +466,16 @@ fn in_namespace(ns: &str, under: Option<&str>) -> bool {
 /// Of files with the same folder and name but different extensions in prefer (book.epub and book.pdf), only the one
 /// whose extension comes first; files of other extensions are kept as they are.
 fn one_format(files: BTreeMap<String, PathBuf>, prefer: &[String]) -> BTreeMap<String, PathBuf> {
-    let ext_of = |rel: &str| rel.rsplit_once('.').map(|(_, e)| e.to_lowercase()).unwrap_or_else(|| rel.to_lowercase());
+    let ext_of = |rel: &str| {
+        rel.rsplit_once('.')
+            .map(|(_, e)| e.to_lowercase())
+            .unwrap_or_else(|| rel.to_lowercase())
+    };
     let mut best: HashMap<String, String> = HashMap::new();
     for rel in files.keys() {
-        let Some((stem, _)) = rel.rsplit_once('.') else { continue };
+        let Some((stem, _)) = rel.rsplit_once('.') else {
+            continue;
+        };
         let ext = ext_of(rel);
         if stem.is_empty() || !prefer.contains(&ext) {
             continue;
@@ -403,9 +489,16 @@ fn one_format(files: BTreeMap<String, PathBuf>, prefer: &[String]) -> BTreeMap<S
         }
     }
     let keep: HashSet<&String> = best.values().collect();
-    let left: Vec<String> = files.keys().filter(|r| prefer.contains(&ext_of(r)) && !keep.contains(r)).cloned().collect();
+    let left: Vec<String> = files
+        .keys()
+        .filter(|r| prefer.contains(&ext_of(r)) && !keep.contains(r))
+        .cloned()
+        .collect();
     if let Some(first) = left.first() {
-        log(&format!("{} file(s) also in a preferred format, skipped (e.g. {first})", left.len()));
+        log(&format!(
+            "{} file(s) also in a preferred format, skipped (e.g. {first})",
+            left.len()
+        ));
     }
     files.into_iter().filter(|(r, _)| !left.contains(r)).collect()
 }
@@ -426,8 +519,15 @@ pub enum Fail {
 
 impl Rag {
     pub fn new(url: &str, key: &str) -> Rag {
-        let http = reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(600)).build().expect("http client");
-        Rag { url: url.trim_end_matches('/').into(), key: key.into(), http }
+        let http = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(600))
+            .build()
+            .expect("http client");
+        Rag {
+            url: url.trim_end_matches('/').into(),
+            key: key.into(),
+            http,
+        }
     }
 
     fn call(&self, path: &str, body: Option<&Value>) -> Result<Value, Fail> {
@@ -436,11 +536,18 @@ impl Rag {
             Some(b) => self.http.post(&url).json(b),
             None => self.http.get(&url),
         };
-        let r = req.header("X-API-Key", &self.key).send().map_err(|e| Fail::Net(format!("{url}: {e}")))?;
+        let r = req
+            .header("X-API-Key", &self.key)
+            .send()
+            .map_err(|e| Fail::Net(format!("{url}: {e}")))?;
         let status = r.status();
         let text = r.text().map_err(|e| Fail::Net(format!("{url}: {e}")))?;
         if !status.is_success() {
-            return Err(Fail::Http(format!("HTTP {} {}", status.as_u16(), text.chars().take(200).collect::<String>())));
+            return Err(Fail::Http(format!(
+                "HTTP {} {}",
+                status.as_u16(),
+                text.chars().take(200).collect::<String>()
+            )));
         }
         Ok(serde_json::from_str(&text).unwrap_or(Value::Null))
     }
@@ -465,8 +572,11 @@ impl Rag {
 }
 
 pub fn load_json(path: &Path) -> Map<String, Value> {
-    std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok())
-        .and_then(|v| v.as_object().cloned()).unwrap_or_default()
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default()
 }
 
 /// Written whole and renamed into place, indented like txtai-kura-sync's files.
@@ -478,13 +588,19 @@ fn save_json(path: &Path, data: &Map<String, Value>) {
     let mut ser = serde_json::Serializer::with_formatter(&mut buf, serde_json::ser::PrettyFormatter::with_indent(b" "));
     serde::Serialize::serialize(data, &mut ser).expect("json");
     let tmp = path.with_extension("tmp");
-    if std::fs::write(&tmp, &buf).and_then(|_| std::fs::rename(&tmp, path)).is_err() {
+    if std::fs::write(&tmp, &buf)
+        .and_then(|_| std::fs::rename(&tmp, path))
+        .is_err()
+    {
         log(&format!("could not write {}", path.display()));
     }
 }
 
 fn git_auth(src: &Table, env: &HashMap<String, String>) -> Vec<String> {
-    let token = s(src, "token_env").and_then(|k| env.get(k)).cloned().unwrap_or_default();
+    let token = s(src, "token_env")
+        .and_then(|k| env.get(k))
+        .cloned()
+        .unwrap_or_default();
     if token.is_empty() {
         return vec![];
     }
@@ -506,7 +622,11 @@ mod base64_lite {
         for c in b.chunks(3) {
             let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
             for k in 0..4 {
-                out.push(if k <= c.len() { T[(n >> (18 - 6 * k) & 63) as usize] as char } else { '=' });
+                out.push(if k <= c.len() {
+                    T[(n >> (18 - 6 * k) & 63) as usize] as char
+                } else {
+                    '='
+                });
             }
         }
         out
@@ -520,17 +640,63 @@ fn fetch_git(src: &Table, env: &HashMap<String, String>, paths: &Paths) -> Resul
     let auth = git_auth(src, env);
     let branch = s(src, "branch").unwrap_or("main");
     let run = |args: Vec<String>| -> Result<(), String> {
-        let st = std::process::Command::new("git").args(&args).status().map_err(|e| format!("git: {e}"))?;
-        if st.success() { Ok(()) } else { Err(format!("{name}: git {} failed ({st})", args.iter().find(|a| ["fetch", "reset", "clone"].contains(&a.as_str())).map(String::as_str).unwrap_or(""))) }
+        let st = std::process::Command::new("git")
+            .args(&args)
+            .status()
+            .map_err(|e| format!("git: {e}"))?;
+        if st.success() {
+            Ok(())
+        } else {
+            Err(format!(
+                "{name}: git {} failed ({st})",
+                args.iter()
+                    .find(|a| ["fetch", "reset", "clone"].contains(&a.as_str()))
+                    .map(String::as_str)
+                    .unwrap_or("")
+            ))
+        }
     };
     let d = dest.to_string_lossy().into_owned();
     if dest.join(".git").exists() {
-        run([auth.clone(), vec!["-C".into(), d.clone(), "fetch".into(), "-q".into(), "--depth".into(), "1".into(), "origin".into(), branch.into()]].concat())?;
-        run(vec!["-C".into(), d, "reset".into(), "-q".into(), "--hard".into(), format!("origin/{branch}")])?;
+        run([
+            auth.clone(),
+            vec![
+                "-C".into(),
+                d.clone(),
+                "fetch".into(),
+                "-q".into(),
+                "--depth".into(),
+                "1".into(),
+                "origin".into(),
+                branch.into(),
+            ],
+        ]
+        .concat())?;
+        run(vec![
+            "-C".into(),
+            d,
+            "reset".into(),
+            "-q".into(),
+            "--hard".into(),
+            format!("origin/{branch}"),
+        ])?;
     } else {
         let _ = std::fs::create_dir_all(dest.parent().unwrap_or(Path::new(".")));
         let url = s(src, "url").ok_or(format!("{name}: a git source needs url"))?;
-        run([auth, vec!["clone".into(), "-q".into(), "--depth".into(), "1".into(), "--branch".into(), branch.into(), url.into(), d]].concat())?;
+        run([
+            auth,
+            vec![
+                "clone".into(),
+                "-q".into(),
+                "--depth".into(),
+                "1".into(),
+                "--branch".into(),
+                branch.into(),
+                url.into(),
+                d,
+            ],
+        ]
+        .concat())?;
     }
     Ok(dest)
 }
@@ -544,7 +710,10 @@ fn label_of(src: &Table) -> String {
 }
 
 fn now() -> f64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0)
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0)
 }
 
 pub struct RunArgs<'a> {
@@ -559,20 +728,37 @@ pub struct RunArgs<'a> {
 /// deleted only there. A source's max_minutes stops it after that long; what was sent is kept (state is saved every
 /// batch), the rest goes in on the next run, and nothing is deleted as gone until a run sees every file.
 /// Ok(1) when something failed (counted), Err when the server or git could not be reached.
-pub fn run(src_cfg: &Sources, env: &HashMap<String, String>, paths: &Paths, rag: &Rag, a: &RunArgs) -> Result<i32, String> {
+pub fn run(
+    src_cfg: &Sources,
+    env: &HashMap<String, String>,
+    paths: &Paths,
+    rag: &Rag,
+    a: &RunArgs,
+) -> Result<i32, String> {
     let mut state = load_json(&paths.state_file());
     let mut file_stamps = load_json(&paths.files_file());
     let (mut changed, mut errors) = (0usize, 0usize);
     let words = &src_cfg.words;
-    let other: Vec<String> = src_cfg.list().iter().filter(|t| !TYPES.contains(&s(t, "type").unwrap_or(""))).map(|t| format!("{} ({})", s(t, "name").unwrap_or(""), s(t, "type").unwrap_or("no type"))).collect();
+    let other: Vec<String> = src_cfg
+        .list()
+        .iter()
+        .filter(|t| !TYPES.contains(&s(t, "type").unwrap_or("")))
+        .map(|t| format!("{} ({})", s(t, "name").unwrap_or(""), s(t, "type").unwrap_or("no type")))
+        .collect();
     if !other.is_empty() && a.names.is_none() {
-        log(&format!("left out, types kurag-sync does not handle: {}", other.join(", ")));
+        log(&format!(
+            "left out, types kurag-sync does not handle: {}",
+            other.join(", ")
+        ));
     }
     for src in src_cfg.list() {
         let name = s(src, "name").unwrap_or("").to_string();
         let typ = s(src, "type").unwrap_or("");
-        if a.only.is_some_and(|o| o != name) || a.names.as_ref().is_some_and(|n| !n.contains(&name))
-            || a.kind.is_some_and(|k| s(src, "kind") != Some(k)) || !TYPES.contains(&typ) {
+        if a.only.is_some_and(|o| o != name)
+            || a.names.as_ref().is_some_and(|n| !n.contains(&name))
+            || a.kind.is_some_and(|k| s(src, "kind") != Some(k))
+            || !TYPES.contains(&typ)
+        {
             continue;
         }
         let include = strings(src, "include", &["**/*.md"]);
@@ -593,7 +779,14 @@ pub fn run(src_cfg: &Sources, env: &HashMap<String, String>, paths: &Paths, rag:
                     vec![fetch_git(src, env, paths)?]
                 } else {
                     let roots: Vec<PathBuf> = strings(src, "path", &[]).iter().map(PathBuf::from).collect();
-                    let names: Vec<String> = roots.iter().map(|r| r.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()).collect();
+                    let names: Vec<String> = roots
+                        .iter()
+                        .map(|r| {
+                            r.file_name()
+                                .map(|n| n.to_string_lossy().into_owned())
+                                .unwrap_or_default()
+                        })
+                        .collect();
                     let unique: HashSet<&String> = names.iter().collect();
                     if roots.is_empty() || roots.iter().any(|r| !r.is_dir()) || unique.len() < names.len() {
                         errors += 1;
@@ -611,7 +804,10 @@ pub fn run(src_cfg: &Sources, env: &HashMap<String, String>, paths: &Paths, rag:
                     // several paths: ids start with the folder name
                     let mut f = BTreeMap::new();
                     for r in &roots {
-                        let top = r.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                        let top = r
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_default();
                         for (rel, p) in collect(r, &include, &exclude, None) {
                             f.insert(format!("{top}/{rel}"), p);
                         }
@@ -625,11 +821,17 @@ pub fn run(src_cfg: &Sources, env: &HashMap<String, String>, paths: &Paths, rag:
         };
         let unmapped: Vec<&String> = files.keys().filter(|r| ns_of(r).is_none()).collect();
         if let Some(first) = unmapped.first() {
-            log(&format!("{name}: {} file(s) outside every namespace folder, skipped (e.g. {first})", unmapped.len()));
+            log(&format!(
+                "{name}: {} file(s) outside every namespace folder, skipped (e.g. {first})",
+                unmapped.len()
+            ));
         }
         files.retain(|rel, _| ns_of(rel).is_some_and(|ns| in_namespace(&ns, a.under)));
         if src.contains_key("prefer") {
-            let prefer: Vec<String> = strings(src, "prefer", &[]).iter().map(|e| e.to_lowercase().trim_start_matches('.').to_string()).collect();
+            let prefer: Vec<String> = strings(src, "prefer", &[])
+                .iter()
+                .map(|e| e.to_lowercase().trim_start_matches('.').to_string())
+                .collect();
             files = one_format(files, &prefer);
         }
         let prefix = format!("{name}:");
@@ -638,29 +840,45 @@ pub fn run(src_cfg: &Sources, env: &HashMap<String, String>, paths: &Paths, rag:
         let mut pending: Vec<(String, String, String, Option<String>, Vec<Value>)> = Vec::new(); // key, sha, ns, old ns, docs
         let before = errors;
         let mut stopped = false;
-        let max_minutes = src.get("max_minutes").and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)));
+        let max_minutes = src
+            .get("max_minutes")
+            .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)));
         let deadline = max_minutes.map(|m| now() + m * 60.0);
         let mut stamps: Map<String, Value> = Map::new();
         let mut parts_by_file: HashMap<String, Vec<String>> = HashMap::new();
         for k in state.keys() {
             if let Some(rest) = k.strip_prefix(&prefix) {
-                parts_by_file.entry(rest.split('#').next().unwrap_or("").to_string()).or_default().push(k.clone());
+                parts_by_file
+                    .entry(rest.split('#').next().unwrap_or("").to_string())
+                    .or_default()
+                    .push(k.clone());
             }
         }
 
-        let flush = |pending: &mut Vec<(String, String, String, Option<String>, Vec<Value>)>, state: &mut Map<String, Value>, errors: &mut usize| -> Result<(), String> {
+        let flush = |pending: &mut Vec<(String, String, String, Option<String>, Vec<Value>)>,
+                     state: &mut Map<String, Value>,
+                     errors: &mut usize|
+         -> Result<(), String> {
             if pending.is_empty() {
                 return Ok(());
             }
             let result = (|| -> Result<(), Fail> {
                 let olds: HashSet<&String> = pending.iter().filter_map(|p| p.3.as_ref()).collect();
                 for ns in olds {
-                    let prefixes: Vec<String> = pending.iter().filter(|p| p.3.as_ref() == Some(ns)).map(|p| format!("{}#", p.0)).collect();
+                    let prefixes: Vec<String> = pending
+                        .iter()
+                        .filter(|p| p.3.as_ref() == Some(ns))
+                        .map(|p| format!("{}#", p.0))
+                        .collect();
                     rag.delete(ns, &prefixes)?;
                 }
                 let news: HashSet<&String> = pending.iter().map(|p| &p.2).collect();
                 for ns in news {
-                    let docs: Vec<Value> = pending.iter().filter(|p| &p.2 == ns).flat_map(|p| p.4.iter().cloned()).collect();
+                    let docs: Vec<Value> = pending
+                        .iter()
+                        .filter(|p| &p.2 == ns)
+                        .flat_map(|p| p.4.iter().cloned())
+                        .collect();
                     rag.upsert(ns, &docs)?;
                 }
                 Ok(())
@@ -685,7 +903,10 @@ pub fn run(src_cfg: &Sources, env: &HashMap<String, String>, paths: &Paths, rag:
         for (rel, path) in &files {
             if deadline.is_some_and(|d| now() > d) {
                 stopped = true;
-                log(&format!("{name}: {} minutes up; the rest goes in on the next run", max_minutes.unwrap_or(0.0)));
+                log(&format!(
+                    "{name}: {} minutes up; the rest goes in on the next run",
+                    max_minutes.unwrap_or(0.0)
+                ));
                 break;
             }
             let ns = ns_of(rel).unwrap_or_default();
@@ -725,8 +946,11 @@ pub fn run(src_cfg: &Sources, env: &HashMap<String, String>, paths: &Paths, rag:
                 if a.dry {
                     continue;
                 }
-                let docs: Vec<Value> = chunks(&ptext).into_iter().enumerate()
-                    .map(|(i, c)| json!({"id": format!("{key}#{i}"), "text": c, "source": place(&label, rel)})).collect();
+                let docs: Vec<Value> = chunks(&ptext)
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, c)| json!({"id": format!("{key}#{i}"), "text": c, "source": place(&label, rel)}))
+                    .collect();
                 let old_ns = old.map(|o| o["namespace"].as_str().unwrap_or(&ns).to_string());
                 pending.push((key, sha, ns.clone(), old_ns, docs));
                 if pending.iter().map(|p| p.4.len()).sum::<usize>() >= BATCH {
@@ -736,19 +960,35 @@ pub fn run(src_cfg: &Sources, env: &HashMap<String, String>, paths: &Paths, rag:
         }
         flush(&mut pending, &mut state, &mut errors)?;
         // files not reached before the time limit are not gone: delete only after a run that saw every file
-        let gone: Vec<String> = if stopped { vec![] } else {
-            state.iter().filter(|(k, v)| k.starts_with(&prefix) && !seen.contains(*k)
-                && in_namespace(v["namespace"].as_str().unwrap_or(""), a.under)).map(|(k, _)| k.clone()).collect()
+        let gone: Vec<String> = if stopped {
+            vec![]
+        } else {
+            state
+                .iter()
+                .filter(|(k, v)| {
+                    k.starts_with(&prefix)
+                        && !seen.contains(*k)
+                        && in_namespace(v["namespace"].as_str().unwrap_or(""), a.under)
+                })
+                .map(|(k, _)| k.clone())
+                .collect()
         };
         for key in &gone {
             log(&format!("delete {key}"));
         }
         changed += gone.len();
         if !gone.is_empty() && !a.dry {
-            let spaces: HashSet<String> = gone.iter().filter_map(|k| state[k]["namespace"].as_str().map(String::from)).collect();
+            let spaces: HashSet<String> = gone
+                .iter()
+                .filter_map(|k| state[k]["namespace"].as_str().map(String::from))
+                .collect();
             let mut result = Ok(());
             for ns in &spaces {
-                let prefixes: Vec<String> = gone.iter().filter(|k| state[*k]["namespace"].as_str() == Some(ns)).map(|k| format!("{k}#")).collect();
+                let prefixes: Vec<String> = gone
+                    .iter()
+                    .filter(|k| state[*k]["namespace"].as_str() == Some(ns))
+                    .map(|k| format!("{k}#"))
+                    .collect();
                 if let Err(e) = rag.delete(ns, &prefixes) {
                     result = Err(e);
                     break;
@@ -772,13 +1012,17 @@ pub fn run(src_cfg: &Sources, env: &HashMap<String, String>, paths: &Paths, rag:
             // with errors, every changed file is read again next run
             if !stopped {
                 // every file was seen: forget the ones that are gone
-                file_stamps.retain(|k, v| !(k.starts_with(&prefix) && in_namespace(v[2].as_str().unwrap_or(""), a.under)));
+                file_stamps
+                    .retain(|k, v| !(k.starts_with(&prefix) && in_namespace(v[2].as_str().unwrap_or(""), a.under)));
             }
             file_stamps.extend(stamps);
             save_json(&paths.files_file(), &file_stamps);
         }
     }
-    log(&format!("done: {changed} change(s), {errors} error(s){}", if a.dry { " (dry run)" } else { "" }));
+    log(&format!(
+        "done: {changed} change(s), {errors} error(s){}",
+        if a.dry { " (dry run)" } else { "" }
+    ));
     Ok(if errors > 0 { 1 } else { 0 })
 }
 
@@ -787,12 +1031,14 @@ pub fn run(src_cfg: &Sources, env: &HashMap<String, String>, paths: &Paths, rag:
 fn interval(text: &str) -> Option<f64> {
     let (n, unit) = text.split_at(text.len().checked_sub(1)?);
     let n: f64 = n.parse().ok()?;
-    Some(n * match unit {
-        "m" => 60.0,
-        "h" => 3600.0,
-        "d" => 86400.0,
-        _ => return None,
-    })
+    Some(
+        n * match unit {
+            "m" => 60.0,
+            "h" => 3600.0,
+            "d" => 86400.0,
+            _ => return None,
+        },
+    )
 }
 
 /// One field of a cron expression: *, 5, 1-5, 1,3,5, */2, 1-10/3.
@@ -807,7 +1053,11 @@ fn cron_field(field: &str, value: i64, low: i64, high: i64) -> bool {
             let v = rng.parse().unwrap_or(i64::MAX);
             (v, v)
         };
-        let step: i64 = if step.is_empty() { 1 } else { step.parse().unwrap_or(1).max(1) };
+        let step: i64 = if step.is_empty() {
+            1
+        } else {
+            step.parse().unwrap_or(1).max(1)
+        };
         a <= value && value <= b && (value - a) % step == 0
     })
 }
@@ -824,7 +1074,11 @@ fn cron_hour(expr: &str, t: &chrono::DateTime<chrono::Local>) -> bool {
     let wd = t.weekday().num_days_from_sunday() as i64;
     let days = cron_field(day, t.day() as i64, 1, 31);
     let wdays = cron_field(wday, wd, 0, 7) || (wd == 0 && cron_field(wday, 7, 0, 7));
-    let dayok = if day != "*" && wday != "*" { days || wdays } else { days && wdays };
+    let dayok = if day != "*" && wday != "*" {
+        days || wdays
+    } else {
+        days && wdays
+    };
     cron_field(hour, t.hour() as i64, 0, 23) && cron_field(month, t.month() as i64, 1, 12) && dayok
 }
 
@@ -832,16 +1086,26 @@ fn cron_hour(expr: &str, t: &chrono::DateTime<chrono::Local>) -> bool {
 /// ([kinds.<kind>]); a source without one is never due. Meant to be called once an hour.
 pub fn due(src_cfg: &Sources, paths: &Paths, now_s: f64) -> Vec<String> {
     let runs = load_json(&paths.runs_file());
-    let t = chrono::DateTime::from_timestamp(now_s as i64, 0).map(|d| d.with_timezone(&chrono::Local)).unwrap_or_else(chrono::Local::now);
+    let t = chrono::DateTime::from_timestamp(now_s as i64, 0)
+        .map(|d| d.with_timezone(&chrono::Local))
+        .unwrap_or_else(chrono::Local::now);
     let kinds = crate::config::table(&src_cfg.cfg, "kinds");
     let mut names = Vec::new();
     for src in src_cfg.list() {
         if !TYPES.contains(&s(src, "type").unwrap_or("")) {
             continue;
         }
-        let own: Table = ["cron", "every", "at"].iter().filter_map(|k| src.get(*k).map(|v| (k.to_string(), v.clone()))).collect();
-        let sched = if !own.is_empty() { own } else {
-            s(src, "kind").and_then(|k| kinds.and_then(|t| t.get(k)).and_then(Toml::as_table)).cloned().unwrap_or_default()
+        let own: Table = ["cron", "every", "at"]
+            .iter()
+            .filter_map(|k| src.get(*k).map(|v| (k.to_string(), v.clone())))
+            .collect();
+        let sched = if !own.is_empty() {
+            own
+        } else {
+            s(src, "kind")
+                .and_then(|k| kinds.and_then(|t| t.get(k)).and_then(Toml::as_table))
+                .cloned()
+                .unwrap_or_default()
         };
         let name = s(src, "name").unwrap_or("").to_string();
         let last = runs.get(&name).and_then(Value::as_f64).unwrap_or(0.0);
@@ -852,7 +1116,10 @@ pub fn due(src_cfg: &Sources, paths: &Paths, now_s: f64) -> Vec<String> {
         } else if let Some(every) = sched.get("every").and_then(Toml::as_str) {
             use chrono::Timelike;
             if let Some(at) = sched.get("at") {
-                let at = at.as_str().and_then(|x| x.parse::<u32>().ok()).or_else(|| at.as_integer().map(|i| i as u32));
+                let at = at
+                    .as_str()
+                    .and_then(|x| x.parse::<u32>().ok())
+                    .or_else(|| at.as_integer().map(|i| i as u32));
                 if at != Some(t.hour()) {
                     continue;
                 }
@@ -878,9 +1145,16 @@ pub fn mark_runs(paths: &Paths, names: &[String], started: f64) {
 
 /// The sources a plain run (not --due) covers, for mark_runs.
 pub fn ran(src_cfg: &Sources, only: Option<&str>, kind: Option<&str>) -> Vec<String> {
-    src_cfg.list().iter().filter(|t| TYPES.contains(&s(t, "type").unwrap_or(""))
-        && only.is_none_or(|o| s(t, "name") == Some(o)) && kind.is_none_or(|k| s(t, "kind") == Some(k)))
-        .filter_map(|t| s(t, "name").map(String::from)).collect()
+    src_cfg
+        .list()
+        .iter()
+        .filter(|t| {
+            TYPES.contains(&s(t, "type").unwrap_or(""))
+                && only.is_none_or(|o| s(t, "name") == Some(o))
+                && kind.is_none_or(|k| s(t, "kind") == Some(k))
+        })
+        .filter_map(|t| s(t, "name").map(String::from))
+        .collect()
 }
 
 // ---- status and shelves ----
@@ -890,11 +1164,17 @@ pub fn status(src_cfg: &Sources, paths: &Paths, rag: &Rag) -> i32 {
     let chunks: u64 = state.values().filter_map(|v| v["chunks"].as_u64()).sum();
     println!("tracked parts: {}, chunks: {chunks}", state.len());
     if !src_cfg.disabled.is_empty() {
-        println!("disabled sources (enabled = false; what they sent stays): {}", src_cfg.disabled.join(", "));
+        println!(
+            "disabled sources (enabled = false; what they sent stays): {}",
+            src_cfg.disabled.join(", ")
+        );
     }
     match rag.namespaces() {
         Ok(v) => {
-            let list: Vec<String> = v.as_object().map(|m| m.iter().map(|(k, n)| format!("{k} {n}")).collect()).unwrap_or_default();
+            let list: Vec<String> = v
+                .as_object()
+                .map(|m| m.iter().map(|(k, n)| format!("{k} {n}")).collect())
+                .unwrap_or_default();
             println!("namespaces (chunks): {}", list.join(", "));
             0
         }
@@ -917,19 +1197,35 @@ pub fn shelves(src_cfg: &Sources, only: Option<&str>, per_file: bool) -> i32 {
             continue;
         }
         let mut origins = Origins::new();
-        let (_, _, n) = shelf_files(src, &strings(src, "include", &["**/*.md"]), &strings(src, "exclude", &[]), &src_cfg.walls, Some(&mut origins));
+        let (_, _, n) = shelf_files(
+            src,
+            &strings(src, "include", &["**/*.md"]),
+            &strings(src, "exclude", &[]),
+            &src_cfg.walls,
+            Some(&mut origins),
+        );
         bad += n;
         let mut rows: BTreeMap<(String, String, String), usize> = BTreeMap::new();
         for (key, (ns, from)) in origins {
             let file = format!("/{key}");
-            let folder = Path::new(&file).parent().map(|p| p.display().to_string()).unwrap_or_default();
+            let folder = Path::new(&file)
+                .parent()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default();
             let shown = if per_file { file.clone() } else { folder.clone() };
-            let from = from.replace(&format!(" ({folder})"), "").replace(&format!("{folder}/"), "");
-            *rows.entry((shown, ns.unwrap_or_else(|| "(not read)".into()), from)).or_insert(0) += 1;
+            let from = from
+                .replace(&format!(" ({folder})"), "")
+                .replace(&format!("{folder}/"), "");
+            *rows
+                .entry((shown, ns.unwrap_or_else(|| "(not read)".into()), from))
+                .or_insert(0) += 1;
         }
         println!("== {}", s(src, "name").unwrap_or(""));
         for ((place, ns, from), count) in rows {
-            println!("{count:5}  {place}  ->  {ns}  [{}]", if from.is_empty() { "no setting" } else { &from });
+            println!(
+                "{count:5}  {place}  ->  {ns}  [{}]",
+                if from.is_empty() { "no setting" } else { &from }
+            );
         }
     }
     if bad > 0 { 1 } else { 0 }
@@ -978,9 +1274,18 @@ mod tests {
         std::fs::write(top.join("alg/sub/d.pdf"), "x").unwrap();
         std::fs::write(top.join("bad/e.pdf"), "x").unwrap();
         std::fs::write(top.join("alg/.rag.toml"), "shelf = \"academic.math.algebra\"\n").unwrap();
-        std::fs::write(top.join("alg/sub/.rag.toml"), "[[file]]\npath = \"d.pdf\"\nnamespace = \"academic.math.ag\"\n").unwrap();
+        std::fs::write(
+            top.join("alg/sub/.rag.toml"),
+            "[[file]]\npath = \"d.pdf\"\nnamespace = \"academic.math.ag\"\n",
+        )
+        .unwrap();
         std::fs::write(top.join("bad/.rag.toml"), "shelf = \"private.x\"\n").unwrap();
-        let src: Table = format!("name = \"b\"\ntype = \"shelf\"\nsub = \"book\"\n[map]\n\"academic.math\" = \"{}\"\n", top.display()).parse().unwrap();
+        let src: Table = format!(
+            "name = \"b\"\ntype = \"shelf\"\nsub = \"book\"\n[map]\n\"academic.math\" = \"{}\"\n",
+            top.display()
+        )
+        .parse()
+        .unwrap();
         let walls = vec!["private".to_string()];
         let mut origins = Origins::new();
         let (files, ns, bad) = shelf_files(&src, &["**/*.pdf".into()], &[], &walls, Some(&mut origins));
@@ -997,7 +1302,10 @@ mod tests {
 
     #[test]
     fn one_format_prefers() {
-        let f: BTreeMap<String, PathBuf> = ["a/b.pdf", "a/b.epub", "a/c.pdf", "a/d.md"].iter().map(|k| (k.to_string(), PathBuf::from(k))).collect();
+        let f: BTreeMap<String, PathBuf> = ["a/b.pdf", "a/b.epub", "a/c.pdf", "a/d.md"]
+            .iter()
+            .map(|k| (k.to_string(), PathBuf::from(k)))
+            .collect();
         let kept: Vec<String> = one_format(f, &["epub".into(), "pdf".into()]).into_keys().collect();
         assert_eq!(kept, ["a/b.epub", "a/c.pdf", "a/d.md"]);
     }

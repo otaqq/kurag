@@ -31,7 +31,17 @@ Rules:
   lower-case English verb phrase (uses, runs on, part of, depends on, written by, ...).
 - At most 15 entities and 20 relations. If the passage names nothing specific: {"entities": [], "relations": []}."#;
 
-const TYPES: [&str; 9] = ["software", "concept", "person", "organization", "place", "machine", "document", "event", "other"];
+const TYPES: [&str; 9] = [
+    "software",
+    "concept",
+    "person",
+    "organization",
+    "place",
+    "machine",
+    "document",
+    "event",
+    "other",
+];
 /// characters of a chunk sent to the model
 pub const MAX_TEXT: usize = 6000;
 /// An answer has at most 15 entities and 20 relations (well under 2,000 tokens). The cap stops a model that repeats
@@ -121,7 +131,10 @@ pub struct Llm {
 
 impl Llm {
     pub fn new(api_base: &str, model: &str, api_key: &str, json_mode: JsonMode) -> Llm {
-        let http = reqwest::blocking::Client::builder().timeout(Duration::from_secs(TIMEOUT)).build().expect("http client");
+        let http = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(TIMEOUT))
+            .build()
+            .expect("http client");
         Llm {
             url: format!("{}/chat/completions", api_base.trim_end_matches('/')),
             model: model.to_string(),
@@ -181,7 +194,10 @@ impl Model for Llm {
     fn place(&self) -> String {
         reqwest::Url::parse(&self.url)
             .ok()
-            .and_then(|u| u.host_str().map(|h| u.port().map_or(h.to_string(), |p| format!("{h}:{p}"))))
+            .and_then(|u| {
+                u.host_str()
+                    .map(|h| u.port().map_or(h.to_string(), |p| format!("{h}:{p}")))
+            })
             .unwrap_or_else(|| self.url.clone())
     }
 }
@@ -215,7 +231,9 @@ pub fn parse(answer: &str, chunk_id: &str) -> Result<Value, String> {
         text = rest.trim_end();
     }
     let data: Value = serde_json::from_str(text).map_err(|e| format!("not JSON: {e}"))?;
-    let Value::Object(data) = data else { return Err("not a JSON object".into()) };
+    let Value::Object(data) = data else {
+        return Err("not a JSON object".into());
+    };
     let empty = Vec::new();
     let list = |key: &str| match data.get(key) {
         Some(Value::Array(a)) => a,
@@ -230,16 +248,24 @@ pub fn parse(answer: &str, chunk_id: &str) -> Result<Value, String> {
             continue;
         }
         let kind = text_of(e.get("type")).trim().to_lowercase();
-        let kind = if TYPES.contains(&kind.as_str()) { kind } else { "other".to_string() };
+        let kind = if TYPES.contains(&kind.as_str()) {
+            kind
+        } else {
+            "other".to_string()
+        };
         names.insert(name.to_lowercase(), name.clone());
-        entities.push(json!({"name": name, "type": kind, "description": cut(&squash(&text_of(e.get("description"))), 500)}));
+        entities.push(
+            json!({"name": name, "type": kind, "description": cut(&squash(&text_of(e.get("description"))), 500)}),
+        );
     }
     let mut relations = Vec::new();
     let mut seen: HashSet<(String, String, String)> = HashSet::new();
     for r in list("relations") {
         let Value::Object(r) = r else { continue };
         let find = |key: &str| names.get(&squash(&text_of(r.get(key))).to_lowercase()).cloned();
-        let (Some(s), Some(t)) = (find("source"), find("target")) else { continue };
+        let (Some(s), Some(t)) = (find("source"), find("target")) else {
+            continue;
+        };
         let mut kind = squash(&text_of(r.get("type")).to_lowercase());
         if kind.is_empty() {
             kind = "related to".into();
@@ -251,7 +277,10 @@ pub fn parse(answer: &str, chunk_id: &str) -> Result<Value, String> {
                 "description": cut(&squash(&text_of(r.get("description"))), 500), "chunk": chunk_id}));
         }
     }
-    let mentions: Vec<Value> = entities.iter().map(|e| json!({"entity": e["name"], "chunk": chunk_id})).collect();
+    let mentions: Vec<Value> = entities
+        .iter()
+        .map(|e| json!({"entity": e["name"], "chunk": chunk_id}))
+        .collect();
     Ok(json!({"entities": entities, "relations": relations, "mentions": mentions}))
 }
 
@@ -298,13 +327,26 @@ pub struct Rag {
 
 impl Rag {
     pub fn new(url: &str, api_key: &str) -> Rag {
-        let http = reqwest::blocking::Client::builder().timeout(Duration::from_secs(600)).build().expect("http client");
-        Rag { url: url.trim_end_matches('/').to_string(), api_key: api_key.to_string(), http }
+        let http = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(600))
+            .build()
+            .expect("http client");
+        Rag {
+            url: url.trim_end_matches('/').to_string(),
+            api_key: api_key.to_string(),
+            http,
+        }
     }
 
     fn call(&self, path: &str, body: &Value) -> Result<Value, String> {
         let url = format!("{}{path}", self.url);
-        let r = self.http.post(&url).header("X-API-Key", &self.api_key).json(body).send().map_err(|e| format!("{url}: {e}"))?;
+        let r = self
+            .http
+            .post(&url)
+            .header("X-API-Key", &self.api_key)
+            .json(body)
+            .send()
+            .map_err(|e| format!("{url}: {e}"))?;
         let status = r.status();
         let text = r.text().map_err(|e| format!("{url}: {e}"))?;
         if !status.is_success() {
@@ -384,7 +426,12 @@ type Done = (Chunk, String, Result<(Value, f64), String>);
 /// turns an API base into a model (one per base for the whole run). An API no longer listed gets no new chunk (its
 /// running requests finish); an API listed anew gets chunks at once. The run ends when no API is left and nothing is
 /// running. A failure of the server ends it with an error.
-pub fn run(server: &dyn Server, bases: &mut Bases, make: &dyn Fn(&str) -> Arc<dyn Model>, s: &Settings) -> Result<i32, String> {
+pub fn run(
+    server: &dyn Server,
+    bases: &mut Bases,
+    make: &dyn Fn(&str) -> Arc<dyn Model>,
+    s: &Settings,
+) -> Result<i32, String> {
     let several = matches!(bases, Bases::File(..)) || {
         let b = bases.current();
         b.iter().collect::<HashSet<_>>().len() > 1
@@ -416,13 +463,20 @@ pub fn run(server: &dyn Server, bases: &mut Bases, make: &dyn Fn(&str) -> Arc<dy
     loop {
         let new_cap = capacity(&bases.current());
         for gone in cap.keys().filter(|b| !new_cap.contains_key(*b)) {
-            log(&format!("api {} removed: no new chunks, {} running request(s) finish", place(&models, gone), busy.get(gone).copied().unwrap_or(0)));
+            log(&format!(
+                "api {} removed: no new chunks, {} running request(s) finish",
+                place(&models, gone),
+                busy.get(gone).copied().unwrap_or(0)
+            ));
         }
         for added in new_cap.keys().filter(|b| !cap.contains_key(*b)) {
             log(&format!("api {} added", place(&models, added)));
         }
         cap = new_cap;
-        let mut room: usize = cap.iter().map(|(b, n)| n.saturating_sub(busy.get(b).copied().unwrap_or(0))).sum();
+        let mut room: usize = cap
+            .iter()
+            .map(|(b, n)| n.saturating_sub(busy.get(b).copied().unwrap_or(0)))
+            .sum();
         if let Some(l) = limit {
             room = room.min(l.saturating_sub(seen.len()));
         }
@@ -434,7 +488,11 @@ pub fn run(server: &dyn Server, bases: &mut Bases, make: &dyn Fn(&str) -> Arc<dy
             let (chunks, _) = server.todo(&s.namespace, room + skip.len())?;
             let asked = room + skip.len();
             let got = chunks.len();
-            let fresh: Vec<Chunk> = chunks.into_iter().filter(|c| !skip.contains(&c.id)).take(room).collect();
+            let fresh: Vec<Chunk> = chunks
+                .into_iter()
+                .filter(|c| !skip.contains(&c.id))
+                .take(room)
+                .collect();
             if fresh.is_empty() && pending.is_empty() {
                 break;
             }
@@ -481,10 +539,17 @@ pub fn run(server: &dyn Server, bases: &mut Bases, make: &dyn Fn(&str) -> Arc<dy
             };
             seconds.push(took);
             done += 1;
-            let (ne, nr) = (result["entities"].as_array().map_or(0, Vec::len), result["relations"].as_array().map_or(0, Vec::len));
+            let (ne, nr) = (
+                result["entities"].as_array().map_or(0, Vec::len),
+                result["relations"].as_array().map_or(0, Vec::len),
+            );
             entities += ne;
             relations += nr;
-            let at = if several { format!(" ({})", place(&models, &base)) } else { String::new() };
+            let at = if several {
+                format!(" ({})", place(&models, &base))
+            } else {
+                String::new()
+            };
             if s.dry_run {
                 let mut line = json!({"chunk": c.id, "seconds": (took * 10.0).round() / 10.0});
                 if several {
@@ -501,7 +566,11 @@ pub fn run(server: &dyn Server, bases: &mut Bases, make: &dyn Fn(&str) -> Arc<dy
         }
     }
     let (_, left) = server.todo(&s.namespace, 1)?;
-    let avg = if seconds.is_empty() { 0.0 } else { seconds.iter().sum::<f64>() / seconds.len() as f64 };
+    let avg = if seconds.is_empty() {
+        0.0
+    } else {
+        seconds.iter().sum::<f64>() / seconds.len() as f64
+    };
     log(&format!(
         "done: {done} chunks, {entities} entities, {relations} relations, {} failed, {avg:.1} s per chunk, {:.0} s in all, {left} left{}",
         failed.len(),
@@ -529,7 +598,12 @@ mod tests {
   {"source": "Pod", "target": "Pod", "type": "is"}, {"source": "Nobody", "target": "Pod"}]}
 ```"#;
         let r = parse(answer, "d:a.md#S#0").unwrap();
-        let names: Vec<&str> = r["entities"].as_array().unwrap().iter().map(|e| e["name"].as_str().unwrap()).collect();
+        let names: Vec<&str> = r["entities"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| e["name"].as_str().unwrap())
+            .collect();
         assert_eq!(names, ["Kubernetes", "Pod"]); // duplicates and empty names go
         assert_eq!(r["entities"][0]["type"], "software");
         assert_eq!(r["entities"][0]["description"], "an orchestrator");
@@ -538,10 +612,17 @@ mod tests {
             r["relations"],
             json!([{"source": "Kubernetes", "target": "Pod", "type": "runs", "description": "", "chunk": "d:a.md#S#0"}])
         );
-        assert_eq!(r["mentions"], json!([{"entity": "Kubernetes", "chunk": "d:a.md#S#0"}, {"entity": "Pod", "chunk": "d:a.md#S#0"}]));
+        assert_eq!(
+            r["mentions"],
+            json!([{"entity": "Kubernetes", "chunk": "d:a.md#S#0"}, {"entity": "Pod", "chunk": "d:a.md#S#0"}])
+        );
         assert!(parse("[1]", "x").is_err());
         assert!(parse("no json", "x").is_err());
-        let r = parse(r#"{"entities": [{"name": "A"}, {"name": "B"}], "relations": [{"source": "A", "target": "B"}]}"#, "c").unwrap();
+        let r = parse(
+            r#"{"entities": [{"name": "A"}, {"name": "B"}], "relations": [{"source": "A", "target": "B"}]}"#,
+            "c",
+        )
+        .unwrap();
         assert_eq!(r["relations"][0]["type"], "related to");
     }
 
@@ -555,8 +636,18 @@ mod tests {
         // and in the same key order: the model writes its answer in the schema's order (name, type, description),
         // so sorted keys gave other answers (serde_json's preserve_order)
         let order = |v: &Value| serde_json::to_string(&v["properties"]["entities"]["items"]["properties"]).unwrap();
-        assert_eq!(order(&schema()), r#"{"name":{"type":"string","maxLength":100},"type":{"type":"string","maxLength":20},"description":{"type":"string","maxLength":200}}"#);
-        assert_eq!((py["max_tokens"].as_u64(), py["max_text"].as_u64(), py["timeout"].as_u64()), (Some(MAX_TOKENS as u64), Some(MAX_TEXT as u64), Some(TIMEOUT)));
+        assert_eq!(
+            order(&schema()),
+            r#"{"name":{"type":"string","maxLength":100},"type":{"type":"string","maxLength":20},"description":{"type":"string","maxLength":200}}"#
+        );
+        assert_eq!(
+            (
+                py["max_tokens"].as_u64(),
+                py["max_text"].as_u64(),
+                py["timeout"].as_u64()
+            ),
+            (Some(MAX_TOKENS as u64), Some(MAX_TEXT as u64), Some(TIMEOUT))
+        );
         assert_eq!(py["retries"], json!(RETRIES));
         let mut types = TYPES.to_vec();
         types.sort();
@@ -569,11 +660,25 @@ mod tests {
         assert_eq!(llm.url, "http://h:11434/v1/chat/completions");
         assert_eq!(llm.place(), "h:11434");
         let b = llm.body("s", "u");
-        assert_eq!((b["max_tokens"].as_u64(), b["temperature"].as_i64()), (Some(MAX_TOKENS as u64), Some(0)));
+        assert_eq!(
+            (b["max_tokens"].as_u64(), b["temperature"].as_i64()),
+            (Some(MAX_TOKENS as u64), Some(0))
+        );
         assert_eq!(b["response_format"]["type"], "json_schema");
-        assert_eq!(b["response_format"]["json_schema"]["schema"]["properties"]["relations"]["maxItems"], MAX_RELATIONS);
-        assert_eq!(Llm::new("http://h/v1", "m", "", JsonMode::Object).body("s", "u")["response_format"], json!({"type": "json_object"}));
-        assert!(Llm::new("http://h/v1", "m", "", JsonMode::None).body("s", "u").get("response_format").is_none());
+        assert_eq!(
+            b["response_format"]["json_schema"]["schema"]["properties"]["relations"]["maxItems"],
+            MAX_RELATIONS
+        );
+        assert_eq!(
+            Llm::new("http://h/v1", "m", "", JsonMode::Object).body("s", "u")["response_format"],
+            json!({"type": "json_object"})
+        );
+        assert!(
+            Llm::new("http://h/v1", "m", "", JsonMode::None)
+                .body("s", "u")
+                .get("response_format")
+                .is_none()
+        );
         assert_eq!(JsonMode::parse("bad"), None);
     }
 
@@ -587,7 +692,13 @@ mod tests {
     }
 
     fn fake(name: &str) -> Arc<Fake> {
-        Arc::new(Fake { name: name.into(), asked: Mutex::new(Vec::new()), fail: HashMap::new(), delay: Duration::ZERO, unreachable_times: Mutex::new(0) })
+        Arc::new(Fake {
+            name: name.into(),
+            asked: Mutex::new(Vec::new()),
+            fail: HashMap::new(),
+            delay: Duration::ZERO,
+            unreachable_times: Mutex::new(0),
+        })
     }
 
     impl Model for Fake {
@@ -622,7 +733,12 @@ mod tests {
 
     fn server(n: usize) -> FakeServer {
         FakeServer {
-            chunks: (0..n).map(|i| Chunk { id: format!("d:a.md#S#{i}"), text: format!("text {i}") }).collect(),
+            chunks: (0..n)
+                .map(|i| Chunk {
+                    id: format!("d:a.md#S#{i}"),
+                    text: format!("text {i}"),
+                })
+                .collect(),
             done: Mutex::new(HashSet::new()),
             upserts: Mutex::new(Vec::new()),
         }
@@ -642,25 +758,51 @@ mod tests {
     }
 
     fn settings(parallel: usize) -> Settings {
-        Settings { namespace: "it".into(), parallel, minutes: None, limit: None, dry_run: false, retries: vec![0, 0] }
+        Settings {
+            namespace: "it".into(),
+            parallel,
+            minutes: None,
+            limit: None,
+            dry_run: false,
+            retries: vec![0, 0],
+        }
     }
 
     fn by_name(models: Vec<Arc<Fake>>) -> impl Fn(&str) -> Arc<dyn Model> {
-        move |b: &str| models.iter().find(|m| m.name == b).cloned().map(|m| m as Arc<dyn Model>).unwrap()
+        move |b: &str| {
+            models
+                .iter()
+                .find(|m| m.name == b)
+                .cloned()
+                .map(|m| m as Arc<dyn Model>)
+                .unwrap()
+        }
     }
 
     #[test]
     fn retries_only_unreachable() {
         let m = fake("a");
         *m.unreachable_times.lock().unwrap() = 2;
-        let c = Chunk { id: "c".into(), text: "t".into() };
+        let c = Chunk {
+            id: "c".into(),
+            text: "t".into(),
+        };
         let (r, _) = extract_one(m.as_ref(), &c, &[0, 0]).unwrap();
-        assert_eq!((m.asked.lock().unwrap().len(), r["entities"].as_array().unwrap().len()), (3, 2));
+        assert_eq!(
+            (m.asked.lock().unwrap().len(), r["entities"].as_array().unwrap().len()),
+            (3, 2)
+        );
         let m = fake("a");
         *m.unreachable_times.lock().unwrap() = 5;
         assert!(extract_one(m.as_ref(), &c, &[0, 0]).is_err());
         assert_eq!(m.asked.lock().unwrap().len(), 3);
-        let mut f = Fake { name: "a".into(), asked: Mutex::new(Vec::new()), fail: HashMap::new(), delay: Duration::ZERO, unreachable_times: Mutex::new(0) };
+        let mut f = Fake {
+            name: "a".into(),
+            asked: Mutex::new(Vec::new()),
+            fail: HashMap::new(),
+            delay: Duration::ZERO,
+            unreachable_times: Mutex::new(0),
+        };
         f.fail.insert("t".into(), "timeout");
         assert!(extract_one(&f, &c, &[0, 0]).is_err());
         assert_eq!(f.asked.lock().unwrap().len(), 1); // a timeout is not tried again
@@ -669,10 +811,22 @@ mod tests {
     #[test]
     fn run_failures_limit_and_dry_run() {
         let srv = server(5);
-        let mut f = Fake { name: "a".into(), asked: Mutex::new(Vec::new()), fail: HashMap::new(), delay: Duration::ZERO, unreachable_times: Mutex::new(0) };
+        let mut f = Fake {
+            name: "a".into(),
+            asked: Mutex::new(Vec::new()),
+            fail: HashMap::new(),
+            delay: Duration::ZERO,
+            unreachable_times: Mutex::new(0),
+        };
         f.fail.insert("text 3".into(), "bad");
         let f = Arc::new(f);
-        let code = run(&srv, &mut Bases::Fixed(vec!["a".into()]), &by_name(vec![f.clone()]), &settings(2)).unwrap();
+        let code = run(
+            &srv,
+            &mut Bases::Fixed(vec!["a".into()]),
+            &by_name(vec![f.clone()]),
+            &settings(2),
+        )
+        .unwrap();
         assert_eq!(code, 1); // one chunk failed
         assert_eq!(srv.done.lock().unwrap().len(), 4);
         assert_eq!(f.asked.lock().unwrap().iter().filter(|t| *t == "text 3").count(), 1); // not asked again in the run
@@ -680,26 +834,63 @@ mod tests {
 
         let srv = server(5);
         let a = fake("a");
-        let s = Settings { limit: Some(3), ..settings(2) };
-        assert_eq!(run(&srv, &mut Bases::Fixed(vec!["a".into()]), &by_name(vec![a.clone()]), &s).unwrap(), 0);
+        let s = Settings {
+            limit: Some(3),
+            ..settings(2)
+        };
+        assert_eq!(
+            run(&srv, &mut Bases::Fixed(vec!["a".into()]), &by_name(vec![a.clone()]), &s).unwrap(),
+            0
+        );
         assert_eq!(srv.done.lock().unwrap().len(), 3);
-        assert_eq!(run(&srv, &mut Bases::Fixed(vec!["a".into()]), &by_name(vec![a]), &settings(2)).unwrap(), 0);
+        assert_eq!(
+            run(
+                &srv,
+                &mut Bases::Fixed(vec!["a".into()]),
+                &by_name(vec![a]),
+                &settings(2)
+            )
+            .unwrap(),
+            0
+        );
         assert_eq!(srv.done.lock().unwrap().len(), 5);
 
         let srv = server(5);
         let a = fake("a");
-        let s = Settings { limit: Some(3), dry_run: true, ..settings(2) };
-        assert_eq!(run(&srv, &mut Bases::Fixed(vec!["a".into()]), &by_name(vec![a.clone()]), &s).unwrap(), 0);
-        assert_eq!((srv.upserts.lock().unwrap().len(), a.asked.lock().unwrap().len()), (0, 3));
+        let s = Settings {
+            limit: Some(3),
+            dry_run: true,
+            ..settings(2)
+        };
+        assert_eq!(
+            run(&srv, &mut Bases::Fixed(vec!["a".into()]), &by_name(vec![a.clone()]), &s).unwrap(),
+            0
+        );
+        assert_eq!(
+            (srv.upserts.lock().unwrap().len(), a.asked.lock().unwrap().len()),
+            (0, 3)
+        );
     }
 
     #[test]
     fn several_apis_share_the_work() {
         let srv = server(12);
         let fast = fake("fast");
-        let slow = Arc::new(Fake { delay: Duration::from_millis(60), ..Arc::try_unwrap(fake("slow")).ok().unwrap() });
+        let slow = Arc::new(Fake {
+            delay: Duration::from_millis(60),
+            ..Arc::try_unwrap(fake("slow")).ok().unwrap()
+        });
         let bases = vec!["fast".into(), "slow".into()];
-        assert_eq!(run(&srv, &mut Bases::Fixed(bases), &by_name(vec![fast.clone(), slow.clone()]), &settings(1)).unwrap(), 0);
+        assert_eq!(
+            run(
+                &srv,
+                &mut Bases::Fixed(bases),
+                &by_name(vec![fast.clone(), slow.clone()]),
+                &settings(1)
+            )
+            .unwrap(),
+            0
+        );
         let (f, s) = (fast.asked.lock().unwrap().len(), slow.asked.lock().unwrap().len());
         assert_eq!((srv.done.lock().unwrap().len(), f + s), (12, 12)); // every chunk once
         assert!(f > s);
@@ -707,9 +898,28 @@ mod tests {
         // dry run, 2 APIs x 2 slots: two rounds of chunks, none twice
         let srv = server(20);
         let (a, b) = (fake("a"), fake("b"));
-        let s = Settings { dry_run: true, ..settings(2) };
-        assert_eq!(run(&srv, &mut Bases::Fixed(vec!["a".into(), "b".into()]), &by_name(vec![a.clone(), b.clone()]), &s).unwrap(), 0);
-        let all: Vec<String> = a.asked.lock().unwrap().iter().chain(b.asked.lock().unwrap().iter()).cloned().collect();
+        let s = Settings {
+            dry_run: true,
+            ..settings(2)
+        };
+        assert_eq!(
+            run(
+                &srv,
+                &mut Bases::Fixed(vec!["a".into(), "b".into()]),
+                &by_name(vec![a.clone(), b.clone()]),
+                &s
+            )
+            .unwrap(),
+            0
+        );
+        let all: Vec<String> = a
+            .asked
+            .lock()
+            .unwrap()
+            .iter()
+            .chain(b.asked.lock().unwrap().iter())
+            .cloned()
+            .collect();
         assert_eq!((all.len(), all.iter().collect::<HashSet<_>>().len()), (8, 8));
     }
 
@@ -719,7 +929,10 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("bases.txt");
         std::fs::write(&path, "# machines\nhttp://a/v1 2\n\nhttp://b/v1  # second\n").unwrap();
-        assert_eq!(read_api_bases(&path).unwrap(), ["http://a/v1", "http://a/v1", "http://b/v1"]);
+        assert_eq!(
+            read_api_bases(&path).unwrap(),
+            ["http://a/v1", "http://a/v1", "http://b/v1"]
+        );
         let mut bases = Bases::File(path.clone(), vec![]);
         assert_eq!(bases.current().len(), 3);
         std::fs::write(&path, "http://b/v1\n").unwrap();
@@ -729,8 +942,14 @@ mod tests {
 
         // a machine taken out while running: its running request finishes, no new one comes
         let srv = server(12);
-        let a = Arc::new(Fake { delay: Duration::from_millis(20), ..Arc::try_unwrap(fake("a")).ok().unwrap() });
-        let b = Arc::new(Fake { delay: Duration::from_millis(20), ..Arc::try_unwrap(fake("b")).ok().unwrap() });
+        let a = Arc::new(Fake {
+            delay: Duration::from_millis(20),
+            ..Arc::try_unwrap(fake("a")).ok().unwrap()
+        });
+        let b = Arc::new(Fake {
+            delay: Duration::from_millis(20),
+            ..Arc::try_unwrap(fake("b")).ok().unwrap()
+        });
         std::fs::write(&path, "a\nb\n").unwrap();
         let (b2, p2) = (b.clone(), path.clone());
         let watcher = std::thread::spawn(move || {
@@ -740,7 +959,13 @@ mod tests {
             }
             std::fs::write(&p2, "a\n").unwrap();
         });
-        let code = run(&srv, &mut Bases::File(path.clone(), vec![]), &by_name(vec![a.clone(), b.clone()]), &settings(1)).unwrap();
+        let code = run(
+            &srv,
+            &mut Bases::File(path.clone(), vec![]),
+            &by_name(vec![a.clone(), b.clone()]),
+            &settings(1),
+        )
+        .unwrap();
         watcher.join().unwrap();
         assert_eq!((code, srv.done.lock().unwrap().len()), (0, 12));
         let nb = b.asked.lock().unwrap().len();
@@ -750,7 +975,16 @@ mod tests {
         // every API gone: the run ends
         let srv = server(12);
         std::fs::write(&path, "").unwrap();
-        assert_eq!(run(&srv, &mut Bases::File(path.clone(), vec![]), &by_name(vec![]), &settings(1)).unwrap(), 0);
+        assert_eq!(
+            run(
+                &srv,
+                &mut Bases::File(path.clone(), vec![]),
+                &by_name(vec![]),
+                &settings(1)
+            )
+            .unwrap(),
+            0
+        );
         assert_eq!(srv.done.lock().unwrap().len(), 0);
         std::fs::remove_dir_all(&dir).unwrap();
     }

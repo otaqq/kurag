@@ -60,12 +60,15 @@ fn not_found(what: String) -> ApiError {
 }
 
 fn checked<T: Check>(req: T) -> Result<T, ApiError> {
-    req.check().map_err(|m| ApiError::Status(StatusCode::UNPROCESSABLE_ENTITY, m))?;
+    req.check()
+        .map_err(|m| ApiError::Status(StatusCode::UNPROCESSABLE_ENTITY, m))?;
     Ok(req)
 }
 
 /// Runs database work off the async threads.
-pub(crate) async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, ApiError> + Send + 'static) -> Result<T, ApiError> {
+pub(crate) async fn blocking<T: Send + 'static>(
+    f: impl FnOnce() -> Result<T, ApiError> + Send + 'static,
+) -> Result<T, ApiError> {
     tokio::task::spawn_blocking(f)
         .await
         .map_err(|e| ApiError::Status(StatusCode::INTERNAL_SERVER_ERROR, format!("task: {e}")))?
@@ -147,18 +150,31 @@ async fn upsert(State(app): S, Json(req): Json<Upsert>) -> Answer<Value> {
         })
         .await?
     };
-    let texts: Vec<String> = docs.iter().filter(|d| !known.contains_key(&d.id)).map(|d| d.text.clone()).collect();
+    let texts: Vec<String> = docs
+        .iter()
+        .filter(|d| !known.contains_key(&d.id))
+        .map(|d| d.text.clone())
+        .collect();
     let mut fresh = app
         .embed
         .embed(&texts)
         .await
         .map_err(|e| ApiError::Status(StatusCode::BAD_GATEWAY, e))?
         .into_iter();
-    let vectors: Vec<Vec<f32>> =
-        docs.iter().map(|d| known.get(&d.id).cloned().unwrap_or_else(|| fresh.next().unwrap_or_default())).collect();
+    let vectors: Vec<Vec<f32>> = docs
+        .iter()
+        .map(|d| {
+            known
+                .get(&d.id)
+                .cloned()
+                .unwrap_or_else(|| fresh.next().unwrap_or_default())
+        })
+        .collect();
     blocking(move || {
         let ns = app.store.get(&name, true)?.expect("created");
-        let count = ns.lock().upsert(&docs, &vectors, app.cfg.edge_neighbours, app.cfg.edge_min)?;
+        let count = ns
+            .lock()
+            .upsert(&docs, &vectors, app.cfg.edge_neighbours, app.cfg.edge_min)?;
         Ok(Json(json!({"namespace": name, "count": count})))
     })
     .await
@@ -189,7 +205,12 @@ async fn delete(State(app): S, Json(req): Json<Delete>) -> Answer<Value> {
 }
 
 /// The namespaces to search that hold chunks.
-fn spaces(app: &App, asked: Option<&[String]>, exclude: Option<&[String]>, with_chunks: bool) -> Result<Vec<Arc<Namespace>>, ApiError> {
+fn spaces(
+    app: &App,
+    asked: Option<&[String]>,
+    exclude: Option<&[String]>,
+    with_chunks: bool,
+) -> Result<Vec<Arc<Namespace>>, ApiError> {
     let mut out = Vec::new();
     for name in app.store.expand(asked, exclude) {
         if let Some(ns) = app.store.get(&name, false)? {
@@ -213,7 +234,11 @@ async fn search_route(State(app): S, Json(req): Json<Search>) -> Answer<Vec<Hit>
     let q = if req.mode == Mode::Text {
         None
     } else {
-        let mut v = app.embed.embed(std::slice::from_ref(&req.query)).await.map_err(|e| ApiError::Status(StatusCode::BAD_GATEWAY, e))?;
+        let mut v = app
+            .embed
+            .embed(std::slice::from_ref(&req.query))
+            .await
+            .map_err(|e| ApiError::Status(StatusCode::BAD_GATEWAY, e))?;
         v.pop()
     };
     blocking(move || Ok(Json(search::run(&found, &req, q.as_deref())?))).await
@@ -223,8 +248,10 @@ async fn kg_upsert(State(app): S, Json(req): Json<KgUpsert>) -> Answer<Value> {
     blocking(move || {
         let ns = app.store.get(&req.namespace, true)?.expect("created");
         let c = ns.lock().kg_upsert(&req)?;
-        Ok(Json(json!({"namespace": req.namespace, "entities": c.entities, "relations": c.relations,
-                       "mentions": c.mentions, "done": c.done})))
+        Ok(Json(
+            json!({"namespace": req.namespace, "entities": c.entities, "relations": c.relations,
+                       "mentions": c.mentions, "done": c.done}),
+        ))
     })
     .await
 }
@@ -232,9 +259,14 @@ async fn kg_upsert(State(app): S, Json(req): Json<KgUpsert>) -> Answer<Value> {
 async fn kg_todo(State(app): S, Json(req): Json<KgTodo>) -> Answer<Value> {
     let req = checked(req)?;
     blocking(move || {
-        let ns = app.store.get(&req.namespace, false)?.ok_or_else(|| not_found(format!("no namespace {}", req.namespace)))?;
+        let ns = app
+            .store
+            .get(&req.namespace, false)?
+            .ok_or_else(|| not_found(format!("no namespace {}", req.namespace)))?;
         let (chunks, remaining) = kg::todo(&ns.lock().db, req.limit)?;
-        Ok(Json(json!({"namespace": req.namespace, "chunks": chunks, "remaining": remaining})))
+        Ok(Json(
+            json!({"namespace": req.namespace, "chunks": chunks, "remaining": remaining}),
+        ))
     })
     .await
 }
@@ -244,11 +276,15 @@ async fn kg_delete(State(app): S, Json(req): Json<Delete>) -> Answer<Value> {
         let prefixes = req.all_prefixes();
         let ns = app.store.get(&req.namespace, false)?;
         let (Some(ns), false) = (ns, prefixes.is_empty()) else {
-            return Ok(Json(json!({"namespace": req.namespace, "relations": 0, "mentions": 0, "entities": 0})));
+            return Ok(Json(
+                json!({"namespace": req.namespace, "relations": 0, "mentions": 0, "entities": 0}),
+            ));
         };
         let ranges: Vec<_> = prefixes.iter().map(|p| ids::prefix_range(p)).collect();
         let (relations, mentions, entities) = ns.lock().kg_delete(&ranges)?;
-        Ok(Json(json!({"namespace": req.namespace, "relations": relations, "mentions": mentions, "entities": entities})))
+        Ok(Json(
+            json!({"namespace": req.namespace, "relations": relations, "mentions": mentions, "entities": entities}),
+        ))
     })
     .await
 }
@@ -264,16 +300,29 @@ async fn kg_search(State(app): S, Json(req): Json<KgSearch>) -> Answer<Value> {
                 continue;
             }
             let around = inner.kg_around(&found, req.depth, req.limit * 5)?;
-            entities.extend(around.entities.into_iter().map(|(name, kind, description, chunks)| KgEntity {
-                namespace: ns.name.clone(),
-                name,
-                kind,
-                description,
-                chunks,
-            }));
-            relations.extend(around.relations.into_iter().map(|(source, target, kind, description, weight, chunks)| {
-                KgRelation { namespace: ns.name.clone(), source, target, kind, description, weight, chunks }
-            }));
+            entities.extend(
+                around
+                    .entities
+                    .into_iter()
+                    .map(|(name, kind, description, chunks)| KgEntity {
+                        namespace: ns.name.clone(),
+                        name,
+                        kind,
+                        description,
+                        chunks,
+                    }),
+            );
+            relations.extend(around.relations.into_iter().map(
+                |(source, target, kind, description, weight, chunks)| KgRelation {
+                    namespace: ns.name.clone(),
+                    source,
+                    target,
+                    kind,
+                    description,
+                    weight,
+                    chunks,
+                },
+            ));
         }
         Ok(Json(json!({"entities": entities, "relations": relations})))
     })
@@ -288,7 +337,10 @@ async fn rebuild(State(app): S, Json(req): Json<Rebuild>) -> Answer<Map<String, 
         };
         let mut out = Map::new();
         for name in names {
-            let ns = app.store.get(&name, false)?.ok_or_else(|| not_found(format!("no namespace {name}")))?;
+            let ns = app
+                .store
+                .get(&name, false)?
+                .ok_or_else(|| not_found(format!("no namespace {name}")))?;
             let n = ns.lock().rebuild()?;
             out.insert(name, json!(n));
         }

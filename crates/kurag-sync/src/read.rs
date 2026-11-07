@@ -13,7 +13,10 @@ use crate::{html, pystr, split};
 
 /// The text of a file (PDF and EPUB: extracted, cached); None when it could not be read (tried again next run).
 pub fn read_text(path: &Path, cache_dir: &Path) -> Option<String> {
-    let low = path.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+    let low = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
     if low.ends_with(".pdf") {
         cached(path, cache_dir, pdf_text)
     } else if low.ends_with(".epub") {
@@ -32,18 +35,26 @@ pub fn read_text(path: &Path, cache_dir: &Path) -> Option<String> {
 /// The text of a file as run reads it, without the cache (`kurag-sync text`): to see what a file gives, or to
 /// compare with another reader.
 pub fn fresh_text(path: &Path) -> Option<String> {
-    let low = path.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+    let low = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
     if low.ends_with(".pdf") {
         pdf_text(path)
     } else if low.ends_with(".epub") {
         epub_text(path)
     } else {
-        std::fs::read(path).ok().map(|b| pystr::universal_newlines(String::from_utf8_lossy(&b).into_owned()))
+        std::fs::read(path)
+            .ok()
+            .map(|b| pystr::universal_newlines(String::from_utf8_lossy(&b).into_owned()))
     }
 }
 
 pub fn sha256_hex(s: &str) -> String {
-    Sha256::digest(s.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
+    Sha256::digest(s.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 /// The file's modification time in seconds as a float, the way Python's `os.stat().st_mtime` makes it.
@@ -71,10 +82,17 @@ fn cached(path: &Path, cache_dir: &Path, read: fn(&Path) -> Option<String>) -> O
     let pages: Vec<&str> = text.split('\u{c}').collect();
     let short = pages.iter().filter(|p| split::readable(p).is_none()).count();
     if short == pages.len() {
-        log(&format!("{}: no text (scanned pages need OCR), skipped", path.display()));
+        log(&format!(
+            "{}: no text (scanned pages need OCR), skipped",
+            path.display()
+        ));
     } else if short > 0 {
-        log(&format!("{}: {short} of {} page(s) without text (fewer than {} letters), skipped", path.display(),
-                     pages.len(), split::MIN_PAGE_CHARS));
+        log(&format!(
+            "{}: {short} of {} page(s) without text (fewer than {} letters), skipped",
+            path.display(),
+            pages.len(),
+            split::MIN_PAGE_CHARS
+        ));
     }
     if let Some(dir) = cache.parent() {
         let _ = std::fs::create_dir_all(dir);
@@ -87,7 +105,12 @@ static WARNED_PDFTOTEXT: std::sync::atomic::AtomicBool = std::sync::atomic::Atom
 
 /// The text of a PDF by pdftotext, pages separated by form feeds. Without pdftotext, None (one warning).
 fn pdf_text(path: &Path) -> Option<String> {
-    let out = match std::process::Command::new("pdftotext").args(["-enc", "UTF-8"]).arg(path).arg("-").output() {
+    let out = match std::process::Command::new("pdftotext")
+        .args(["-enc", "UTF-8"])
+        .arg(path)
+        .arg("-")
+        .output()
+    {
         Ok(o) => o,
         Err(_) => {
             if !WARNED_PDFTOTEXT.swap(true, std::sync::atomic::Ordering::Relaxed) {
@@ -98,10 +121,16 @@ fn pdf_text(path: &Path) -> Option<String> {
     };
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
-        log(&format!("{}: pdftotext failed: {}", path.display(), pystr::strip(&err).chars().take(200).collect::<String>()));
+        log(&format!(
+            "{}: pdftotext failed: {}",
+            path.display(),
+            pystr::strip(&err).chars().take(200).collect::<String>()
+        ));
         return None;
     }
-    Some(pystr::universal_newlines(String::from_utf8_lossy(&out.stdout).into_owned()))
+    Some(pystr::universal_newlines(
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+    ))
 }
 
 /// The text of an EPUB: the spine's items in reading order, one chapter each, separated by form feeds. The package
@@ -145,7 +174,11 @@ fn epub_text(path: &Path) -> Option<String> {
         let attr = |k: &str| after(tag, &format!("{k}=\"")).unwrap_or_default();
         items.insert(attr("id"), attr("href"));
     }
-    let spine: Vec<String> = opf.split("<itemref ").skip(1).filter_map(|t| after(t, "idref=\"")).collect();
+    let spine: Vec<String> = opf
+        .split("<itemref ")
+        .skip(1)
+        .filter_map(|t| after(t, "idref=\""))
+        .collect();
     let mut chapters = Vec::new();
     for idref in spine {
         let href = url_path(items.get(&idref).map(String::as_str).unwrap_or("")).replace('\\', "/");
@@ -157,7 +190,11 @@ fn epub_text(path: &Path) -> Option<String> {
             Err(e) => return fail(e),
         };
         let t = html::text(&raw);
-        let lines: Vec<&str> = pystr::splitlines(&t).into_iter().map(pystr::strip).filter(|l| !l.is_empty()).collect();
+        let lines: Vec<&str> = pystr::splitlines(&t)
+            .into_iter()
+            .map(pystr::strip)
+            .filter(|l| !l.is_empty())
+            .collect();
         let text = lines.join("\n");
         if !text.is_empty() {
             chapters.push(text);
@@ -200,8 +237,14 @@ mod tests {
         assert_eq!(url_path("Text/ch%201.xhtml#x"), "Text/ch 1.xhtml");
         assert_eq!(url_path("a%E3%81%82.xhtml"), "aあ.xhtml");
         assert_eq!(url_path("100%"), "100%");
-        assert_eq!(after("a full-path=\"OEBPS/c.opf\" x", "full-path=\""), Some("OEBPS/c.opf".into()));
-        assert_eq!(sha256_hex("abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        assert_eq!(
+            after("a full-path=\"OEBPS/c.opf\" x", "full-path=\""),
+            Some("OEBPS/c.opf".into())
+        );
+        assert_eq!(
+            sha256_hex("abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
         // a cached mtime (written by Python's json) reads back as the same float as the file's (float_roundtrip)
         let v: Value = serde_json::from_str("{\"mtime\": 1579017409.4108493}").unwrap();
         assert_eq!(v["mtime"].as_f64(), Some(1579017409f64 + 410849300f64 * 1e-9));

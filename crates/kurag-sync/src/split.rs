@@ -20,13 +20,20 @@ pub struct Words {
 
 impl Default for Words {
     fn default() -> Words {
-        Words { intro: "(intro)".into(), source: "Source: {where}".into() }
+        Words {
+            intro: "(intro)".into(),
+            source: "Source: {where}".into(),
+        }
     }
 }
 
 /// Where a file comes from: "<label>/<path>", or the path alone for a shelf source (its paths are absolute).
 pub fn place(label: &str, rel: &str) -> String {
-    if label.is_empty() { rel.to_string() } else { format!("{label}/{rel}") }
+    if label.is_empty() {
+        rel.to_string()
+    } else {
+        format!("{label}/{rel}")
+    }
 }
 
 fn source_line(w: &Words, label: &str, rel: &str, at: &str) -> String {
@@ -49,7 +56,10 @@ pub fn readable(page: &str) -> Option<String> {
 /// " (2)", " (3)" ...
 pub fn split_markdown(text: &str, w: &Words, label: &str, rel: &str) -> Vec<(String, String)> {
     let lines = pystr::splitlines(text);
-    let title = lines.iter().find(|l| l.starts_with("# ")).map(|l| pystr::strip(&l[2..]).to_string())
+    let title = lines
+        .iter()
+        .find(|l| l.starts_with("# "))
+        .map(|l| pystr::strip(&l[2..]).to_string())
         .unwrap_or_else(|| rel.to_string());
     let intro = w.intro.as_str();
     let mut parts: Vec<(String, Vec<&str>)> = Vec::new();
@@ -59,7 +69,10 @@ pub fn split_markdown(text: &str, w: &Words, label: &str, rel: &str) -> Vec<(Str
             fence = !fence;
         }
         if !fence && line.starts_with("## ") {
-            parts.push((std::mem::replace(&mut name, pystr::strip(&line[3..]).to_string()), std::mem::take(&mut buf)));
+            parts.push((
+                std::mem::replace(&mut name, pystr::strip(&line[3..]).to_string()),
+                std::mem::take(&mut buf),
+            ));
         }
         buf.push(line);
     }
@@ -76,7 +89,11 @@ pub fn split_markdown(text: &str, w: &Words, label: &str, rel: &str) -> Vec<(Str
         *count += 1;
         let name = if *count > 1 { format!("{name} ({count})") } else { name };
         let src = source_line(w, label, rel, "");
-        let text = if name != intro { format!("# {title}\n\n{src}\n\n{body}\n") } else { format!("{src}\n\n{body}\n") };
+        let text = if name != intro {
+            format!("# {title}\n\n{src}\n\n{body}\n")
+        } else {
+            format!("{src}\n\n{body}\n")
+        };
         out.push((name, text));
     }
     out
@@ -85,7 +102,10 @@ pub fn split_markdown(text: &str, w: &Words, label: &str, rel: &str) -> Vec<(Str
 /// A PDF's pages or an EPUB's chapters (form feeds): [("<unit>.<n>", text)], each with the file name, page or
 /// chapter and where it comes from. Pages with too little text are left out.
 pub fn split_pages(text: &str, w: &Words, label: &str, rel: &str, unit: &str) -> Vec<(String, String)> {
-    let title = std::path::Path::new(rel).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let title = std::path::Path::new(rel)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let mut out = Vec::new();
     for (k, page) in text.split('\u{c}').enumerate() {
         if let Some(page) = readable(page) {
@@ -125,8 +145,16 @@ pub fn chunks(text: &str) -> Vec<String> {
         Some(l) if l.starts_with("# ") => pystr::strip(pystr::lstrip_chars(l, "# ")).to_string(),
         _ => String::new(),
     };
-    let section = lines.iter().find(|l| l.starts_with("## ")).map(|l| pystr::strip(&l[3..]).to_string()).unwrap_or_default();
-    let head = [title, section].into_iter().filter(|x| !x.is_empty()).collect::<Vec<_>>().join(" › ");
+    let section = lines
+        .iter()
+        .find(|l| l.starts_with("## "))
+        .map(|l| pystr::strip(&l[3..]).to_string())
+        .unwrap_or_default();
+    let head = [title, section]
+        .into_iter()
+        .filter(|x| !x.is_empty())
+        .collect::<Vec<_>>()
+        .join(" › ");
     let mut out: Vec<String> = Vec::new();
     let mut buf = String::new();
     let mut buf_len = 0usize; // characters in buf
@@ -155,7 +183,16 @@ pub fn chunks(text: &str) -> Vec<String> {
     if !pystr::strip(&buf).is_empty() {
         out.push(buf);
     }
-    out.into_iter().enumerate().map(|(i, c)| if i == 0 || head.is_empty() { c } else { format!("{head}\n{c}") }).collect()
+    out.into_iter()
+        .enumerate()
+        .map(|(i, c)| {
+            if i == 0 || head.is_empty() {
+                c
+            } else {
+                format!("{head}\n{c}")
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -163,14 +200,20 @@ mod tests {
     use super::*;
 
     fn japanese() -> Words {
-        Words { intro: "(冒頭)".into(), source: "（出典: {where}）".into() }
+        Words {
+            intro: "(冒頭)".into(),
+            source: "（出典: {where}）".into(),
+        }
     }
 
     #[test]
     fn markdown_sections() {
         let md = "# T\n\nintro\n\n## A\n\na\n```\n## not\n```\n## A\n\nb\n";
         let p = split_markdown(md, &japanese(), "git/x", "d/r.md");
-        assert_eq!(p.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["(冒頭)", "A", "A (2)"]);
+        assert_eq!(
+            p.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
+            ["(冒頭)", "A", "A (2)"]
+        );
         assert_eq!(p[0].1, "（出典: git/x/d/r.md）\n\n# T\n\nintro\n");
         assert_eq!(p[1].1, "# T\n\n（出典: git/x/d/r.md）\n\n## A\n\na\n```\n## not\n```\n");
         // a file that is only its title has no intro part

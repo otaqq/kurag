@@ -33,8 +33,12 @@ pub fn search(db: &Connection, table: &str, query: &str, limit: usize) -> rusqli
         if expr.is_empty() || out.len() >= limit {
             break;
         }
-        let mut st = db.prepare_cached(&format!("select rowid, rank from {table} where {table} match ?1 order by rank limit ?2"))?;
-        let rows = st.query_map(params![expr, limit as i64], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, f64>(1)?)))?;
+        let mut st = db.prepare_cached(&format!(
+            "select rowid, rank from {table} where {table} match ?1 order by rank limit ?2"
+        ))?;
+        let rows = st.query_map(params![expr, limit as i64], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, f64>(1)?))
+        })?;
         for row in rows {
             let (id, rank) = row?;
             if out.len() < limit && !out.iter().any(|(i, _)| *i == id) {

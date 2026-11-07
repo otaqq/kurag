@@ -39,7 +39,9 @@ pub fn prefix_range(prefix: &str) -> (String, Option<String>) {
 
 /// Whether `name` is one of `names` or under one of them.
 pub fn under(name: &str, names: &[String]) -> bool {
-    names.iter().any(|n| name == n || name.strip_prefix(n.as_str()).is_some_and(|rest| rest.starts_with('.')))
+    names
+        .iter()
+        .any(|n| name == n || name.strip_prefix(n.as_str()).is_some_and(|rest| rest.starts_with('.')))
 }
 
 /// The namespaces to search among `all`: every one, or each asked namespace with everything under it, minus the
@@ -76,10 +78,18 @@ mod tests {
 
     #[test]
     fn trees() {
-        let all: Vec<String> = ["academic.cs", "academic.math", "academics", "notes"].map(String::from).to_vec();
+        let all: Vec<String> = ["academic.cs", "academic.math", "academics", "notes"]
+            .map(String::from)
+            .to_vec();
         let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
-        assert_eq!(expand(&all, Some(&s(&["academic"])), None), s(&["academic.cs", "academic.math"]));
-        assert_eq!(expand(&all, None, Some(&s(&["academic.cs"]))), s(&["academic.math", "academics", "notes"]));
+        assert_eq!(
+            expand(&all, Some(&s(&["academic"])), None),
+            s(&["academic.cs", "academic.math"])
+        );
+        assert_eq!(
+            expand(&all, None, Some(&s(&["academic.cs"]))),
+            s(&["academic.math", "academics", "notes"])
+        );
         assert_eq!(expand(&all, Some(&s(&["Bad Name"])), None), Vec::<String>::new());
     }
 }

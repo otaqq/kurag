@@ -25,7 +25,10 @@ async fn main() {
     match args.iter().map(String::as_str).collect::<Vec<_>>()[..] {
         [] => {}
         ["import", src] => {
-            let data = std::env::var("DATA_DIR").ok().filter(|v| !v.is_empty()).unwrap_or_else(|| "data".into());
+            let data = std::env::var("DATA_DIR")
+                .ok()
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| "data".into());
             if let Err(e) = import::run(std::path::Path::new(src), std::path::Path::new(&data)) {
                 eprintln!("kurag import: {e}");
                 std::process::exit(1);
@@ -33,7 +36,10 @@ async fn main() {
             return;
         }
         ["recall", questions] => {
-            let data = std::env::var("DATA_DIR").ok().filter(|v| !v.is_empty()).unwrap_or_else(|| "data".into());
+            let data = std::env::var("DATA_DIR")
+                .ok()
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| "data".into());
             if let Err(e) = recall::run(std::path::Path::new(questions), std::path::Path::new(&data)).await {
                 eprintln!("kurag recall: {e}");
                 std::process::exit(1);
@@ -42,8 +48,12 @@ async fn main() {
         }
         _ => {
             eprintln!("usage: kurag                 run the server (settings from the environment)");
-            eprintln!("       kurag import <dir>    copy txtai-kura namespaces (<dir>/<namespace>/kura.db) into DATA_DIR");
-            eprintln!("       kurag recall <tsv>    recall@5 of servers A_URL / B_URL against exact search over DATA_DIR");
+            eprintln!(
+                "       kurag import <dir>    copy txtai-kura namespaces (<dir>/<namespace>/kura.db) into DATA_DIR"
+            );
+            eprintln!(
+                "       kurag recall <tsv>    recall@5 of servers A_URL / B_URL against exact search over DATA_DIR"
+            );
             std::process::exit(2);
         }
     }
@@ -58,7 +68,10 @@ async fn main() {
     let (kind, url) = (cfg.vector_backend.clone(), cfg.vector_url.clone());
     let (gkind, gurl) = (cfg.graph_backend.clone(), cfg.graph_url.clone());
     let (made, graph) = std::thread::spawn(move || {
-        (backend::from_settings(&kind, url.as_deref()), backend::graph_from_settings(&gkind, gurl.as_deref()))
+        (
+            backend::from_settings(&kind, url.as_deref()),
+            backend::graph_from_settings(&gkind, gurl.as_deref()),
+        )
     })
     .join()
     .expect("backend thread");
@@ -77,17 +90,28 @@ async fn main() {
             std::process::exit(2);
         }
     };
-    let index = remote.as_ref().map_or("memory".to_string(), |r: &Arc<dyn backend::RemoteIndex>| r.name().to_string());
+    let index = remote
+        .as_ref()
+        .map_or("memory".to_string(), |r: &Arc<dyn backend::RemoteIndex>| {
+            r.name().to_string()
+        });
     let app = Arc::new(http::App {
         store: store::Store::new(cfg.data_dir.clone(), remote).with_graph(graph),
         embed: embed::Embedder::new(&cfg),
         cfg,
     });
-    let listener = tokio::net::TcpListener::bind(&app.cfg.listen).await.unwrap_or_else(|e| {
-        eprintln!("kurag: cannot listen on {}: {e}", app.cfg.listen);
-        std::process::exit(2);
-    });
-    eprintln!("kurag {}: listening on {}, data in {}, vector index {index}, graph {graph_name}", env!("CARGO_PKG_VERSION"), app.cfg.listen, app.cfg.data_dir.display());
+    let listener = tokio::net::TcpListener::bind(&app.cfg.listen)
+        .await
+        .unwrap_or_else(|e| {
+            eprintln!("kurag: cannot listen on {}: {e}", app.cfg.listen);
+            std::process::exit(2);
+        });
+    eprintln!(
+        "kurag {}: listening on {}, data in {}, vector index {index}, graph {graph_name}",
+        env!("CARGO_PKG_VERSION"),
+        app.cfg.listen,
+        app.cfg.data_dir.display()
+    );
     axum::serve(listener, http::router(app))
         .with_graceful_shutdown(async {
             // SIGINT, or SIGTERM as sent by Kubernetes and systemd

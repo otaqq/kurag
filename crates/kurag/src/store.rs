@@ -12,7 +12,10 @@ use kurag_core::{ids, score, text, types::Doc};
 use rusqlite::{Connection, OptionalExtension, params, params_from_iter};
 
 use crate::backend::{FILL_BATCH, GraphStore, RemoteIndex};
-use crate::{fts, kg, sections, vectors::{Range, Vectors}};
+use crate::{
+    fts, kg, sections,
+    vectors::{Range, Vectors},
+};
 
 pub const DB: &str = "kurag.db";
 
@@ -74,7 +77,9 @@ fn to_f16_bytes(v: &[f32]) -> Vec<u8> {
 }
 
 fn from_f16_bytes(b: &[u8]) -> Vec<f32> {
-    b.chunks_exact(2).map(|c| f16::from_le_bytes([c[0], c[1]]).to_f32()).collect()
+    b.chunks_exact(2)
+        .map(|c| f16::from_le_bytes([c[0], c[1]]).to_f32())
+        .collect()
 }
 
 fn in_parts(n: usize) -> impl Iterator<Item = std::ops::Range<usize>> {
@@ -82,18 +87,33 @@ fn in_parts(n: usize) -> impl Iterator<Item = std::ops::Range<usize>> {
 }
 
 impl Namespace {
-    fn open(name: &str, path: &Path, remote: Option<Arc<dyn RemoteIndex>>, graph: Option<Arc<dyn GraphStore>>) -> Result<Namespace> {
+    fn open(
+        name: &str,
+        path: &Path,
+        remote: Option<Arc<dyn RemoteIndex>>,
+        graph: Option<Arc<dyn GraphStore>>,
+    ) -> Result<Namespace> {
         std::fs::create_dir_all(path)?;
         let db = Connection::open(path.join(DB))?;
         db.query_row("pragma journal_mode=wal", [], |_| Ok(()))?;
         db.execute_batch("pragma synchronous=normal")?;
         db.execute_batch(&format!("{SCHEMA}{}{}{}", fts::SCHEMA, kg::SCHEMA, sections::SCHEMA))?;
-        let mut inner = Inner { db, vecs: None, remote, graph, graph_stale: false, name: name.to_string() };
+        let mut inner = Inner {
+            db,
+            vecs: None,
+            remote,
+            graph,
+            graph_stale: false,
+            name: name.to_string(),
+        };
         inner.load_vectors()?;
         if inner.graph.is_some() {
             inner.sync_graph(false)?;
         }
-        Ok(Namespace { name: name.to_string(), inner: Mutex::new(inner) })
+        Ok(Namespace {
+            name: name.to_string(),
+            inner: Mutex::new(inner),
+        })
     }
 
     pub fn lock(&self) -> MutexGuard<'_, Inner> {
@@ -180,15 +200,20 @@ impl Inner {
     // ---- the copy of the graph in a graph backend ----
 
     fn graph_version(&self) -> Result<i64> {
-        let v: Option<String> =
-            self.db.query_row("select value from meta where key = 'graph_version'", [], |r| r.get(0)).optional()?;
+        let v: Option<String> = self
+            .db
+            .query_row("select value from meta where key = 'graph_version'", [], |r| r.get(0))
+            .optional()?;
         Ok(v.and_then(|v| v.parse().ok()).unwrap_or(0))
     }
 
     /// The next version of the graph, in the caller's transaction.
     fn bump_graph(&self, tx: &Connection) -> Result<i64> {
         let v = self.graph_version()? + 1;
-        tx.execute("insert or replace into meta(key, value) values ('graph_version', ?1)", [v.to_string()])?;
+        tx.execute(
+            "insert or replace into meta(key, value) values ('graph_version', ?1)",
+            [v.to_string()],
+        )?;
         Ok(v)
     }
 
@@ -204,13 +229,26 @@ impl Inner {
         }
         graph.clear(&ns).map_err(fail)?;
         let all = |sql: &str| -> Result<Vec<(i64, i64, f64)>> {
-            Ok(self.db.prepare(sql)?.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<_>>()?)
+            Ok(self
+                .db
+                .prepare(sql)?
+                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+                .collect::<rusqlite::Result<_>>()?)
         };
-        let chunks: Vec<(i64, String)> =
-            self.db.prepare("select vid, id from chunks")?.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
+        let chunks: Vec<(i64, String)> = self
+            .db
+            .prepare("select vid, id from chunks")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
         graph.add_chunks(&ns, &chunks).map_err(fail)?;
-        graph.add_edges(&ns, &all("select a, b, w from edges where a < b")?).map_err(fail)?;
-        let eids: Vec<i64> = self.db.prepare("select eid from entities")?.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+        graph
+            .add_edges(&ns, &all("select a, b, w from edges where a < b")?)
+            .map_err(fail)?;
+        let eids: Vec<i64> = self
+            .db
+            .prepare("select eid from entities")?
+            .query_map([], |r| r.get(0))?
+            .collect::<rusqlite::Result<_>>()?;
         graph.add_entities(&ns, &eids).map_err(fail)?;
         let relations: Vec<(i64, i64, String, f64, String)> = self
             .db
@@ -250,15 +288,29 @@ impl Inner {
     fn mentions_of(&self, chunk_ids: &[&str]) -> Result<Vec<(i64, i64)>> {
         let mut out = Vec::new();
         for part in chunk_ids.chunks(500) {
-            let sql = format!("select m.eid, c.vid from mentions m join chunks c on c.id = m.chunk where m.chunk in ({})", kg::marks(part.len()));
-            out.extend(self.db.prepare(&sql)?.query_map(params_from_iter(part), |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?);
+            let sql = format!(
+                "select m.eid, c.vid from mentions m join chunks c on c.id = m.chunk where m.chunk in ({})",
+                kg::marks(part.len())
+            );
+            out.extend(
+                self.db
+                    .prepare(&sql)?
+                    .query_map(params_from_iter(part), |r| Ok((r.get(0)?, r.get(1)?)))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?,
+            );
         }
         Ok(out)
     }
 
     /// Upserted chunks in the copy (in the caller's transaction, before it commits): old rows out, new rows and
     /// their edges in, and the mentions the tables keep for those chunk ids.
-    fn graph_chunks(&self, tx: &Connection, removed: &[i64], added: &[(i64, String)], pairs: &HashMap<(i64, i64), f64>) -> Result<()> {
+    fn graph_chunks(
+        &self,
+        tx: &Connection,
+        removed: &[i64],
+        added: &[(i64, String)],
+        pairs: &HashMap<(i64, i64), f64>,
+    ) -> Result<()> {
         let Some(graph) = &self.graph else { return Ok(()) };
         let (ns, fail) = (&self.name, Error::Backend);
         let version = self.bump_graph(tx)?;
@@ -272,7 +324,13 @@ impl Inner {
     }
 
     /// Deleted chunks and what the knowledge graph learned from the id ranges, in the copy.
-    fn graph_delete(&self, tx: &Connection, vids: &[i64], ranges: &[(String, Option<String>)], removed: &[i64]) -> Result<()> {
+    fn graph_delete(
+        &self,
+        tx: &Connection,
+        vids: &[i64],
+        ranges: &[(String, Option<String>)],
+        removed: &[i64],
+    ) -> Result<()> {
         let Some(graph) = &self.graph else { return Ok(()) };
         let (ns, fail) = (&self.name, Error::Backend);
         let version = self.bump_graph(tx)?;
@@ -289,7 +347,10 @@ impl Inner {
         let result = (|| -> Result<kurag_core::types::KgCounts> {
             let tx = self.db.unchecked_transaction()?;
             // the sections' labels may show these entities
-            let chunks: Vec<&str> = req.done.iter().map(String::as_str)
+            let chunks: Vec<&str> = req
+                .done
+                .iter()
+                .map(String::as_str)
                 .chain(req.mentions.iter().map(|m| m.chunk.as_str()))
                 .chain(req.relations.iter().map(|r| r.chunk.as_str()).filter(|c| !c.is_empty()))
                 .collect();
@@ -306,17 +367,26 @@ impl Inner {
                 if !change.relations.is_empty() {
                     let sources = set(change.relations.iter().map(|r| r.0).collect());
                     let targets = set(change.relations.iter().map(|r| r.1).collect());
-                    let chunks: Vec<String> =
-                        change.relations.iter().map(|r| r.4.clone()).collect::<HashSet<_>>().into_iter().collect();
+                    let chunks: Vec<String> = change
+                        .relations
+                        .iter()
+                        .map(|r| r.4.clone())
+                        .collect::<HashSet<_>>()
+                        .into_iter()
+                        .collect();
                     graph.remove_relations(ns, &sources, &targets, &chunks).map_err(fail)?;
-                    graph.add_relations(ns, &self.relations_among(&tx, &sources, &targets, &chunks)?).map_err(fail)?;
+                    graph
+                        .add_relations(ns, &self.relations_among(&tx, &sources, &targets, &chunks)?)
+                        .map_err(fail)?;
                 }
                 if !change.mentions.is_empty() {
                     let ids: Vec<&str> = change.mentions.iter().map(|(_, c)| c.as_str()).collect();
                     let vids = set(self.vids_by_id(&ids)?.into_values().collect());
                     let eids = set(change.mentions.iter().map(|m| m.0).collect());
                     graph.remove_mentions(ns, &eids, &vids).map_err(fail)?;
-                    graph.add_mentions(ns, &self.mentions_among(&tx, &eids, &vids)?).map_err(fail)?;
+                    graph
+                        .add_mentions(ns, &self.mentions_among(&tx, &eids, &vids)?)
+                        .map_err(fail)?;
                 }
                 graph.remove_entities(ns, &change.removed).map_err(fail)?;
                 graph.set_version(ns, version).map_err(fail)?;
@@ -347,7 +417,13 @@ impl Inner {
     }
 
     /// The relations in the tables from these sources to these targets learned from these chunks.
-    fn relations_among(&self, db: &Connection, sources: &[i64], targets: &[i64], chunks: &[String]) -> Result<Vec<(i64, i64, String, f64, String)>> {
+    fn relations_among(
+        &self,
+        db: &Connection,
+        sources: &[i64],
+        targets: &[i64],
+        chunks: &[String],
+    ) -> Result<Vec<(i64, i64, String, f64, String)>> {
         let sql = format!(
             "select source, target, type, weight, chunk from relations where source in ({}) and target in ({}) and chunk in ({})",
             kg::marks(sources.len()),
@@ -356,7 +432,12 @@ impl Inner {
         );
         let mut args: Vec<rusqlite::types::Value> = sources.iter().chain(targets).map(|&v| v.into()).collect();
         args.extend(chunks.iter().map(|c| c.clone().into()));
-        Ok(db.prepare(&sql)?.query_map(params_from_iter(args), |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))?.collect::<rusqlite::Result<_>>()?)
+        Ok(db
+            .prepare(&sql)?
+            .query_map(params_from_iter(args), |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+            })?
+            .collect::<rusqlite::Result<_>>()?)
     }
 
     /// The mentions in the tables of these entities in these chunks: (entity, chunk row id).
@@ -370,14 +451,21 @@ impl Inner {
             kg::marks(vids.len())
         );
         let args: Vec<i64> = eids.iter().chain(vids).copied().collect();
-        Ok(db.prepare(&sql)?.query_map(params_from_iter(args), |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?)
+        Ok(db
+            .prepare(&sql)?
+            .query_map(params_from_iter(args), |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?)
     }
 
     fn vids_by_id(&self, chunk_ids: &[&str]) -> Result<HashMap<String, i64>> {
         let mut out = HashMap::new();
         for part in chunk_ids.chunks(500) {
             let sql = format!("select id, vid from chunks where id in ({})", kg::marks(part.len()));
-            for row in self.db.prepare(&sql)?.query_map(params_from_iter(part), |r| Ok((r.get::<_, String>(0)?, r.get(1)?)))? {
+            for row in self
+                .db
+                .prepare(&sql)?
+                .query_map(params_from_iter(part), |r| Ok((r.get::<_, String>(0)?, r.get(1)?)))?
+            {
                 let (id, vid) = row?;
                 out.insert(id, vid);
             }
@@ -418,7 +506,11 @@ impl Inner {
 
     /// Dimensions of the stored vectors (float16: two bytes each), None when there is none.
     fn stored_dims(&self) -> Result<Option<usize>> {
-        Ok(self.db.query_row("select length(v) / 2 from vectors limit 1", [], |r| r.get::<_, i64>(0)).optional()?.map(|d| d as usize))
+        Ok(self
+            .db
+            .query_row("select length(v) / 2 from vectors limit 1", [], |r| r.get::<_, i64>(0))
+            .optional()?
+            .map(|d| d as usize))
     }
 
     /// The stored float16 copy of a chunk's vector.
@@ -437,16 +529,23 @@ impl Inner {
 
     /// Nothing left: no chunk and no entity.
     pub fn empty(&self) -> Result<bool> {
-        let entity: Option<i64> = self.db.query_row("select 1 from entities limit 1", [], |r| r.get(0)).optional()?;
+        let entity: Option<i64> = self
+            .db
+            .query_row("select 1 from entities limit 1", [], |r| r.get(0))
+            .optional()?;
         Ok(self.count()? == 0 && entity.is_none())
     }
 
     /// Stored vectors of the chunks with these ids, when their text is `text`: they need no embedding again.
     pub fn unchanged(&self, docs: &[Doc]) -> Result<HashMap<String, Vec<f32>>> {
         let mut out = HashMap::new();
-        let mut st = self.db.prepare_cached("select c.text, v.v from chunks c join vectors v on v.vid = c.vid where c.id = ?1")?;
+        let mut st = self
+            .db
+            .prepare_cached("select c.text, v.v from chunks c join vectors v on v.vid = c.vid where c.id = ?1")?;
         for d in docs {
-            let row = st.query_row([&d.id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Vec<u8>>(1)?))).optional()?;
+            let row = st
+                .query_row([&d.id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Vec<u8>>(1)?)))
+                .optional()?;
             if let Some((t, v)) = row
                 && t == d.text
             {
@@ -460,8 +559,14 @@ impl Inner {
         let mut out = Vec::new();
         for r in in_parts(chunk_ids.len()) {
             let part = &chunk_ids[r];
-            let mut st = self.db.prepare(&format!("select vid from chunks where id in ({})", kg::marks(part.len())))?;
-            out.extend(st.query_map(params_from_iter(part), |r| r.get::<_, i64>(0))?.collect::<rusqlite::Result<Vec<_>>>()?);
+            let mut st = self.db.prepare(&format!(
+                "select vid from chunks where id in ({})",
+                kg::marks(part.len())
+            ))?;
+            out.extend(
+                st.query_map(params_from_iter(part), |r| r.get::<_, i64>(0))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?,
+            );
         }
         Ok(out)
     }
@@ -471,7 +576,11 @@ impl Inner {
         for p in prefixes {
             let (lo, hi) = ids::prefix_range(p);
             let vids: Vec<i64> = match hi {
-                None => self.db.prepare("select vid from chunks where id >= ?1")?.query_map([lo], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?,
+                None => self
+                    .db
+                    .prepare("select vid from chunks where id >= ?1")?
+                    .query_map([lo], |r| r.get(0))?
+                    .collect::<rusqlite::Result<_>>()?,
                 Some(hi) => self
                     .db
                     .prepare("select vid from chunks where id >= ?1 and id < ?2")?
@@ -557,7 +666,8 @@ impl Inner {
         old.iter().for_each(|&vid| vecs.remove(vid));
         let mut vids = Vec::with_capacity(docs.len());
         {
-            let mut chunk = tx.prepare_cached("insert into chunks(id, section, source, text) values (?1, ?2, ?3, ?4)")?;
+            let mut chunk =
+                tx.prepare_cached("insert into chunks(id, section, source, text) values (?1, ?2, ?3, ?4)")?;
             let mut vector = tx.prepare_cached("insert into vectors(vid, v) values (?1, ?2)")?;
             for (d, v) in docs.iter().zip(vectors) {
                 chunk.execute(params![d.id, ids::section_of(&d.id), d.source, d.text])?;
@@ -606,7 +716,8 @@ impl Inner {
         remote.remove(&self.name, old).map_err(Error::Backend)?;
         let mut vids = Vec::with_capacity(docs.len());
         {
-            let mut chunk = tx.prepare_cached("insert into chunks(id, section, source, text) values (?1, ?2, ?3, ?4)")?;
+            let mut chunk =
+                tx.prepare_cached("insert into chunks(id, section, source, text) values (?1, ?2, ?3, ?4)")?;
             let mut vector = tx.prepare_cached("insert into vectors(vid, v) values (?1, ?2)")?;
             for (d, v) in docs.iter().zip(vectors) {
                 chunk.execute(params![d.id, ids::section_of(&d.id), d.source, d.text])?;
@@ -626,7 +737,10 @@ impl Inner {
         {
             let mut edge = tx.prepare_cached("insert or replace into edges(a, b, w) values (?1, ?2, ?3)")?;
             for (&vid, v) in vids.iter().zip(vectors) {
-                for (other, s) in remote.neighbours(&self.name, v, neighbours + 1).map_err(Error::Backend)? {
+                for (other, s) in remote
+                    .neighbours(&self.name, v, neighbours + 1)
+                    .map_err(Error::Backend)?
+                {
                     if other != vid && s >= edge_min {
                         edge.execute(params![vid, other, s as f64])?;
                         edge.execute(params![other, vid, s as f64])?;
@@ -658,7 +772,8 @@ impl Inner {
             let removed = in_parts(vids.len()).try_for_each(|r| remote.remove(&self.name, &vids[r]));
             if let Err(e) = removed {
                 // the rows are gone: fill the index again from what is left, or report both failures
-                self.sync_remote(true).map_err(|again| Error::Backend(format!("{e}; filling it again: {again:?}")))?;
+                self.sync_remote(true)
+                    .map_err(|again| Error::Backend(format!("{e}; filling it again: {again:?}")))?;
             }
         }
         Ok(vids.len())
@@ -669,8 +784,13 @@ impl Inner {
         let mut out = HashMap::new();
         for r in in_parts(vids.len()) {
             let part = &vids[r];
-            let mut st = self.db.prepare(&format!("select vid, id, source, text from chunks where vid in ({})", kg::marks(part.len())))?;
-            let rows = st.query_map(params_from_iter(part), |r| Ok((r.get::<_, i64>(0)?, (r.get(1)?, r.get(2)?, r.get(3)?))))?;
+            let mut st = self.db.prepare(&format!(
+                "select vid, id, source, text from chunks where vid in ({})",
+                kg::marks(part.len())
+            ))?;
+            let rows = st.query_map(params_from_iter(part), |r| {
+                Ok((r.get::<_, i64>(0)?, (r.get(1)?, r.get(2)?, r.get(3)?)))
+            })?;
             for row in rows {
                 let (vid, c) = row?;
                 out.insert(vid, c);
@@ -685,7 +805,12 @@ impl Inner {
             let hits = remote.nearest(&self.name, q, limit).map_err(Error::Backend)?;
             return Ok(hits.into_iter().map(|(vid, s)| (vid, s as f64)).collect());
         }
-        Ok(self.vecs.as_ref().map_or(Vec::new(), |v| v.nearest(q, limit).into_iter().map(|(vid, s)| (vid, s as f64)).collect()))
+        Ok(self.vecs.as_ref().map_or(Vec::new(), |v| {
+            v.nearest(q, limit)
+                .into_iter()
+                .map(|(vid, s)| (vid, s as f64))
+                .collect()
+        }))
     }
 
     /// Cosine similarity of the query to a chunk (with an external index, from the stored float16 copy).
@@ -721,10 +846,15 @@ impl Inner {
         if let Some(graph) = self.fresh_graph()? {
             return graph.neighbours(&self.name, vids, min_weight).map_err(Error::Backend);
         }
-        let mut st = self.db.prepare(&format!("select b, w, a from edges where a in ({}) and w >= ?", kg::marks(vids.len())))?;
+        let mut st = self.db.prepare(&format!(
+            "select b, w, a from edges where a in ({}) and w >= ?",
+            kg::marks(vids.len())
+        ))?;
         let mut args: Vec<rusqlite::types::Value> = vids.iter().map(|&v| v.into()).collect();
         args.push(min_weight.into());
-        Ok(st.query_map(params_from_iter(args), |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<_>>()?)
+        Ok(st
+            .query_map(params_from_iter(args), |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<rusqlite::Result<_>>()?)
     }
 }
 
@@ -739,7 +869,12 @@ pub struct Store {
 impl Store {
     /// The store; `remote` is the external vector index, None for the in-memory one.
     pub fn new(data: PathBuf, remote: Option<Arc<dyn RemoteIndex>>) -> Store {
-        Store { data, open: Mutex::new(HashMap::new()), remote, graph: None }
+        Store {
+            data,
+            open: Mutex::new(HashMap::new()),
+            remote,
+            graph: None,
+        }
     }
 
     /// The store with a graph backend (None: the namespaces' own tables).
@@ -753,12 +888,18 @@ impl Store {
     }
 
     pub fn check(name: &str) -> Result<()> {
-        if ids::valid_namespace(name) { Ok(()) } else { Err(Error::Bad(format!("bad namespace name: {name}"))) }
+        if ids::valid_namespace(name) {
+            Ok(())
+        } else {
+            Err(Error::Bad(format!("bad namespace name: {name}")))
+        }
     }
 
     /// Names of the namespaces on disk, sorted.
     pub fn names(&self) -> Vec<String> {
-        let Ok(dir) = std::fs::read_dir(&self.data) else { return Vec::new() };
+        let Ok(dir) = std::fs::read_dir(&self.data) else {
+            return Vec::new();
+        };
         let mut out: Vec<String> = dir
             .filter_map(|e| e.ok())
             .filter(|e| e.path().join(DB).exists())

@@ -5,14 +5,34 @@
 
 use crate::entities::{HTML5, INVALID_CHARREFS, INVALID_CODEPOINTS};
 
-const BLOCK: [&str; 14] = ["p", "div", "br", "li", "tr", "h1", "h2", "h3", "h4", "h5", "h6", "section", "blockquote", "pre"];
+const BLOCK: [&str; 14] = [
+    "p",
+    "div",
+    "br",
+    "li",
+    "tr",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "section",
+    "blockquote",
+    "pre",
+];
 const SKIP: [&str; 3] = ["script", "style", "head"];
 const RAWTEXT: [&str; 6] = ["script", "style", "xmp", "iframe", "noembed", "noframes"];
 const RCDATA: [&str; 2] = ["textarea", "title"];
 
 /// The text handed to handle_data, joined (what txtai-kura-sync's _Text collects in out).
 pub fn text(doc: &str) -> String {
-    let mut p = Parser { s: doc.chars().collect(), out: String::new(), skip: 0, cdata: None };
+    let mut p = Parser {
+        s: doc.chars().collect(),
+        out: String::new(),
+        skip: 0,
+        cdata: None,
+    };
     p.goahead();
     p.out
 }
@@ -151,7 +171,9 @@ impl Parser {
             self.s[p] == '<'
                 && self.at(p + 1) == Some('/')
                 && p + 2 + e.len() < n
-                && e.iter().enumerate().all(|(x, c)| self.s[p + 2 + x].eq_ignore_ascii_case(c))
+                && e.iter()
+                    .enumerate()
+                    .all(|(x, c)| self.s[p + 2 + x].eq_ignore_ascii_case(c))
                 && matches!(self.s[p + 2 + e.len()], '\t' | '\n' | '\r' | '\u{c}' | ' ' | '/' | '>')
         })
     }
@@ -167,7 +189,8 @@ impl Parser {
             q += 1;
         }
         loop {
-            if q >= n || !self.after_attr_gap(q) || matches!(self.s[q], '\t' | '\n' | '\r' | '\u{c}' | ' ' | '/' | '>') {
+            if q >= n || !self.after_attr_gap(q) || matches!(self.s[q], '\t' | '\n' | '\r' | '\u{c}' | ' ' | '/' | '>')
+            {
                 break;
             }
             q = self.attr_name_end(q);
@@ -348,7 +371,13 @@ pub fn unescape(s: &str) -> String {
             let hex = i + 2 < n && (c[i + 2] == 'x' || c[i + 2] == 'X');
             let from = if hex { i + 3 } else { i + 2 };
             let mut k = from;
-            while k < n && (if hex { c[k].is_ascii_hexdigit() } else { c[k].is_ascii_digit() }) {
+            while k < n
+                && (if hex {
+                    c[k].is_ascii_hexdigit()
+                } else {
+                    c[k].is_ascii_digit()
+                })
+            {
                 k += 1;
             }
             if k > from {
@@ -394,7 +423,9 @@ fn numeric(digits: &str, radix: u32) -> String {
     if INVALID_CODEPOINTS.binary_search(&num).is_ok() {
         return String::new();
     }
-    char::from_u32(num).map(String::from).unwrap_or_else(|| "\u{FFFD}".to_string())
+    char::from_u32(num)
+        .map(String::from)
+        .unwrap_or_else(|| "\u{FFFD}".to_string())
 }
 
 fn lookup(name: &str) -> Option<&'static str> {
@@ -423,8 +454,10 @@ mod tests {
 
     #[test]
     fn unescape_like_python() {
-        assert_eq!(unescape("a &amp; b &lt;c&gt; &#x41;&#66; &#150; &copy &notit; &#0; &nosuch;"),
-                   "a & b <c> AB \u{2013} \u{a9} \u{ac}it; \u{FFFD} &nosuch;");
+        assert_eq!(
+            unescape("a &amp; b &lt;c&gt; &#x41;&#66; &#150; &copy &notit; &#0; &nosuch;"),
+            "a & b <c> AB \u{2013} \u{a9} \u{ac}it; \u{FFFD} &nosuch;"
+        );
         assert_eq!(unescape("&#xD800;&#1114112;"), "\u{FFFD}\u{FFFD}");
         assert_eq!(unescape("& &# &x"), "& &# &x");
     }

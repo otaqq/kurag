@@ -33,13 +33,18 @@ pub fn marks(n: usize) -> String {
 /// The entity's id; created if new, its type and description filled in when given.
 fn entity_id(db: &Connection, name: &str, kind: &str, description: &str) -> rusqlite::Result<i64> {
     let row = db
-        .query_row("select eid, type, description from entities where name = ?1", [name], |r| {
-            Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
-        })
+        .query_row(
+            "select eid, type, description from entities where name = ?1",
+            [name],
+            |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)),
+        )
         .optional()?;
     match row {
         None => {
-            db.execute("insert into entities(name, type, description) values (?1, ?2, ?3)", params![name, kind, description])?;
+            db.execute(
+                "insert into entities(name, type, description) values (?1, ?2, ?3)",
+                params![name, kind, description],
+            )?;
             let eid = db.last_insert_rowid();
             fts::add(db, "entities_fts", &[(eid, &format!("{name} {description}"))])?;
             Ok(eid)
@@ -48,7 +53,10 @@ fn entity_id(db: &Connection, name: &str, kind: &str, description: &str) -> rusq
             if (!kind.is_empty() && kind != t) || (!description.is_empty() && description != d) {
                 let kind = if kind.is_empty() { &t } else { kind };
                 let description = if description.is_empty() { &d } else { description };
-                db.execute("update entities set type = ?1, description = ?2 where eid = ?3", params![kind, description, eid])?;
+                db.execute(
+                    "update entities set type = ?1, description = ?2 where eid = ?3",
+                    params![kind, description, eid],
+                )?;
                 fts::remove(db, "entities_fts", &[eid])?;
                 fts::add(db, "entities_fts", &[(eid, &format!("{name} {description}"))])?;
             }
@@ -73,7 +81,10 @@ pub struct Change {
 }
 
 pub fn upsert(db: &Connection, req: &KgUpsert) -> rusqlite::Result<(KgCounts, Change)> {
-    let mut change = Change { done: req.done.clone(), ..Default::default() };
+    let mut change = Change {
+        done: req.done.clone(),
+        ..Default::default()
+    };
     for chunk in &req.done {
         db.execute("delete from relations where chunk = ?1", [chunk])?;
         db.execute("delete from mentions where chunk = ?1", [chunk])?;
@@ -92,16 +103,24 @@ pub fn upsert(db: &Connection, req: &KgUpsert) -> rusqlite::Result<(KgCounts, Ch
     }
     for m in &req.mentions {
         let eid = entity_id(db, &m.entity, "", "")?;
-        db.execute("insert or ignore into mentions(eid, chunk) values (?1, ?2)", params![eid, m.chunk])?;
+        db.execute(
+            "insert or ignore into mentions(eid, chunk) values (?1, ?2)",
+            params![eid, m.chunk],
+        )?;
         change.entities.push(eid);
         change.mentions.push((eid, m.chunk.clone()));
     }
     change.entities.sort_unstable();
     change.entities.dedup();
     for chunk in &req.done {
-        let vid: Option<i64> = db.query_row("select vid from chunks where id = ?1", [chunk], |r| r.get(0)).optional()?;
+        let vid: Option<i64> = db
+            .query_row("select vid from chunks where id = ?1", [chunk], |r| r.get(0))
+            .optional()?;
         if let Some(vid) = vid {
-            db.execute("insert or replace into kg_done(chunk, vid) values (?1, ?2)", params![chunk, vid])?;
+            db.execute(
+                "insert or replace into kg_done(chunk, vid) values (?1, ?2)",
+                params![chunk, vid],
+            )?;
         }
     }
     if !req.done.is_empty() {
@@ -115,7 +134,13 @@ pub fn todo(db: &Connection, limit: usize) -> rusqlite::Result<(Vec<TodoChunk>, 
     let cond = "from chunks c left join kg_done d on d.chunk = c.id where d.vid is null or d.vid != c.vid";
     let mut st = db.prepare(&format!("select c.id, c.source, c.text {cond} order by c.vid limit ?1"))?;
     let chunks = st
-        .query_map([limit as i64], |r| Ok(TodoChunk { id: r.get(0)?, source: r.get(1)?, text: r.get(2)? }))?
+        .query_map([limit as i64], |r| {
+            Ok(TodoChunk {
+                id: r.get(0)?,
+                source: r.get(1)?,
+                text: r.get(2)?,
+            })
+        })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let total = db.query_row(&format!("select count(*) {cond}"), [], |r| r.get(0))?;
     Ok((chunks, total))
@@ -123,7 +148,12 @@ pub fn todo(db: &Connection, limit: usize) -> rusqlite::Result<(Vec<TodoChunk>, 
 
 pub fn counts(db: &Connection) -> rusqlite::Result<KgCounts> {
     let n = |t: &str| db.query_row(&format!("select count(*) from {t}"), [], |r| r.get::<_, i64>(0));
-    Ok(KgCounts { entities: n("entities")?, relations: n("relations")?, mentions: n("mentions")?, done: n("kg_done")? })
+    Ok(KgCounts {
+        entities: n("entities")?,
+        relations: n("relations")?,
+        mentions: n("mentions")?,
+        done: n("kg_done")?,
+    })
 }
 
 /// Removes relations and mentions learned from chunks in the id ranges, then entities left with nothing:
@@ -135,7 +165,10 @@ pub fn delete(db: &Connection, ranges: &[(String, Option<String>)]) -> rusqlite:
             None => ("chunk >= ?", vec![lo.as_str()]),
             Some(hi) => ("chunk >= ? and chunk < ?", vec![lo.as_str(), hi.as_str()]),
         };
-        relations += db.execute(&format!("delete from relations where chunk != '' and {cond}"), params_from_iter(&args))? as i64;
+        relations += db.execute(
+            &format!("delete from relations where chunk != '' and {cond}"),
+            params_from_iter(&args),
+        )? as i64;
         mentions += db.execute(&format!("delete from mentions where {cond}"), params_from_iter(&args))? as i64;
         db.execute(&format!("delete from kg_done where {cond}"), params_from_iter(&args))?;
     }
@@ -199,13 +232,20 @@ pub fn relations_around(db: &Connection, eids: &[i64], limit: usize) -> rusqlite
     args.extend(eids);
     args.push(limit as i64);
     db.prepare(&sql)?
-        .query_map(params_from_iter(&args), |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?
+        .query_map(params_from_iter(&args), |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        })?
         .collect()
 }
 
 /// Entities reached from `eids` within `depth` steps (the start ones first), at most `limit`; and the relations
 /// walked, in the order they were reached.
-pub fn walk(eids: &[i64], depth: usize, limit: usize, step: Step) -> Result<(Vec<i64>, Vec<(i64, i64, String, f64)>), String> {
+pub fn walk(
+    eids: &[i64],
+    depth: usize,
+    limit: usize,
+    step: Step,
+) -> Result<(Vec<i64>, Vec<(i64, i64, String, f64)>), String> {
     let mut seen: Vec<i64> = eids.to_vec();
     let mut frontier: Vec<i64> = eids.to_vec();
     let mut rels: Vec<(i64, i64, String, f64)> = Vec::new();
@@ -244,9 +284,11 @@ pub fn around(db: &Connection, eids: &[i64], depth: usize, limit: usize, step: S
     let mut entities = Vec::new();
     for eid in seen {
         let row = db
-            .query_row("select name, type, description from entities where eid = ?1", [eid], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
-            })
+            .query_row(
+                "select name, type, description from entities where eid = ?1",
+                [eid],
+                |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)),
+            )
             .optional()
             .map_err(fail)?;
         let Some((name, kind, description)) = row else { continue };
@@ -262,7 +304,9 @@ pub fn around(db: &Connection, eids: &[i64], depth: usize, limit: usize, step: S
     }
     let mut relations = Vec::new();
     for (s, t, ty, w) in rels {
-        let (Some(sn), Some(tn)) = (names.get(&s), names.get(&t)) else { continue };
+        let (Some(sn), Some(tn)) = (names.get(&s), names.get(&t)) else {
+            continue;
+        };
         let (chunks, description): (Option<String>, Option<String>) = db
             .query_row(
                 "select group_concat(nullif(chunk, ''), char(31)), max(description) from relations
@@ -271,7 +315,9 @@ pub fn around(db: &Connection, eids: &[i64], depth: usize, limit: usize, step: S
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .map_err(fail)?;
-        let chunks: Vec<String> = chunks.map(|c| c.split('\u{1f}').map(String::from).collect()).unwrap_or_default();
+        let chunks: Vec<String> = chunks
+            .map(|c| c.split('\u{1f}').map(String::from).collect())
+            .unwrap_or_default();
         relations.push((sn.clone(), tn.clone(), ty, description.unwrap_or_default(), w, chunks));
     }
     Ok(Around { entities, relations })
@@ -286,6 +332,8 @@ pub fn chunks_mentioning(db: &Connection, eids: &[i64]) -> rusqlite::Result<Vec<
         "select c.vid, count(*) from mentions m join chunks c on c.id = m.chunk where m.eid in ({}) group by c.vid",
         marks(eids.len())
     ))?
-    .query_map(params_from_iter(eids), |r| Ok((r.get(0)?, r.get::<_, i64>(1)? as usize)))?
+    .query_map(params_from_iter(eids), |r| {
+        Ok((r.get(0)?, r.get::<_, i64>(1)? as usize))
+    })?
     .collect()
 }

@@ -27,9 +27,14 @@ struct Exact {
 }
 
 fn load(store: &Store, name: &str) -> Result<Option<Exact>, String> {
-    let Some(ns) = store.get(name, false).map_err(|e| format!("{name}: {e:?}"))? else { return Ok(None) };
+    let Some(ns) = store.get(name, false).map_err(|e| format!("{name}: {e:?}"))? else {
+        return Ok(None);
+    };
     let inner = ns.lock();
-    let mut st = inner.db.prepare("select vid, v from vectors").map_err(|e| e.to_string())?;
+    let mut st = inner
+        .db
+        .prepare("select vid, v from vectors")
+        .map_err(|e| e.to_string())?;
     let mut rows = st.query([]).map_err(|e| e.to_string())?;
     let (mut vids, mut data, mut dims) = (Vec::new(), Vec::new(), 0);
     while let Some(r) = rows.next().map_err(|e| e.to_string())? {
@@ -59,7 +64,15 @@ async fn ask(http: &reqwest::Client, s: &Server, ns: &str, q: &str) -> Result<Ve
         return Err(format!("{}: {}", s.name, r.status()));
     }
     let hits: Vec<Value> = r.json().await.map_err(|e| format!("{}: {e}", s.name))?;
-    Ok(hits.iter().map(|h| (h["namespace"].as_str().unwrap_or("").into(), h["id"].as_str().unwrap_or("").into())).collect())
+    Ok(hits
+        .iter()
+        .map(|h| {
+            (
+                h["namespace"].as_str().unwrap_or("").into(),
+                h["id"].as_str().unwrap_or("").into(),
+            )
+        })
+        .collect())
 }
 
 pub async fn run(path: &Path, data: &Path) -> Result<(), String> {
@@ -85,7 +98,11 @@ pub async fn run(path: &Path, data: &Path) -> Result<(), String> {
     let mut servers = Vec::new();
     for (name, p) in [("A", "A"), ("B", "B")] {
         if let Some(url) = var(&format!("{p}_URL")) {
-            servers.push(Server { name, url, key: var(&format!("{p}_KEY")).unwrap_or_default() });
+            servers.push(Server {
+                name,
+                url,
+                key: var(&format!("{p}_KEY")).unwrap_or_default(),
+            });
         }
     }
     let questions: Vec<(String, String)> = std::fs::read_to_string(path)
@@ -111,7 +128,11 @@ pub async fn run(path: &Path, data: &Path) -> Result<(), String> {
             }
             let Some(e) = cache[&name].as_ref() else { continue };
             if e.dims != v.len() {
-                return Err(format!("{name}: {} dimensions stored, the query has {}", e.dims, v.len()));
+                return Err(format!(
+                    "{name}: {} dimensions stored, the query has {}",
+                    e.dims,
+                    v.len()
+                ));
             }
             for (j, vid) in e.vids.iter().enumerate() {
                 let row = &e.data[j * e.dims..(j + 1) * e.dims];

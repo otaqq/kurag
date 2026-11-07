@@ -24,14 +24,21 @@ static ONLY_CJK: LazyLock<Regex> = LazyLock::new(|| Regex::new(&format!(r"^[{KAT
 
 /// Runs of one script, in order; hiragana runs left out.
 pub fn runs(text: &str) -> Vec<&str> {
-    RUN.find_iter(text).map(|m| m.as_str()).filter(|r| !ONLY_HIRAGANA.is_match(r)).collect()
+    RUN.find_iter(text)
+        .map(|m| m.as_str())
+        .filter(|r| !ONLY_HIRAGANA.is_match(r))
+        .collect()
 }
 
 /// A run as the full-text index sees it: a CJK run becomes its bigrams, joined by spaces.
 pub fn phrase(run: &str) -> String {
     let chars: Vec<char> = run.chars().collect();
     if chars.len() > 1 && ONLY_CJK.is_match(run) {
-        chars.windows(2).map(|w| w.iter().collect::<String>()).collect::<Vec<_>>().join(" ")
+        chars
+            .windows(2)
+            .map(|w| w.iter().collect::<String>())
+            .collect::<Vec<_>>()
+            .join(" ")
     } else {
         run.to_string()
     }
@@ -71,7 +78,11 @@ pub fn coverage(terms: &[String], text: &str) -> f64 {
         return 0.0;
     }
     let folded = tokens(text).to_lowercase();
-    let found: usize = terms.iter().filter(|t| folded.contains(&phrase(t).to_lowercase())).map(|t| t.chars().count()).sum();
+    let found: usize = terms
+        .iter()
+        .filter(|t| folded.contains(&phrase(t).to_lowercase()))
+        .map(|t| t.chars().count())
+        .sum();
     found as f64 / total as f64
 }
 

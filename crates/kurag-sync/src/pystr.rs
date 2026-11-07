@@ -59,7 +59,11 @@ pub fn splitlines(s: &str) -> Vec<&str> {
 
 /// What Python's text mode reads (universal newlines): \r\n and \r become \n.
 pub fn universal_newlines(s: String) -> String {
-    if s.contains('\r') { s.replace("\r\n", "\n").replace('\r', "\n") } else { s }
+    if s.contains('\r') {
+        s.replace("\r\n", "\n").replace('\r', "\n")
+    } else {
+        s
+    }
 }
 
 /// `fnmatch.fnmatch(name, pattern)` on POSIX: case-sensitive, `*` matches anything (also "/"), `?` one character,

@@ -2,7 +2,10 @@
 //! `kurag_contract::embed`: same text, same vector, on every server under test. Listens on `FAKE_EMBED_LISTEN`
 //! (default `0.0.0.0:9651`).
 
-use axum::{Json, Router, routing::{get, post}};
+use axum::{
+    Json, Router,
+    routing::{get, post},
+};
 use base64::Engine;
 use serde::Deserialize;
 use serde_json::{Value, json};

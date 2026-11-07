@@ -79,9 +79,11 @@ pub fn forget_all(db: &Connection) -> rusqlite::Result<()> {
 /// (label, where its keywords came from: "kg", "terms" or "" when none was found), made and kept if new.
 pub fn label(db: &Connection, section: &str) -> rusqlite::Result<(String, String)> {
     let kept = db
-        .query_row("select label, source from section_labels where section = ?1", [section], |r| {
-            Ok((r.get(0)?, r.get(1)?))
-        })
+        .query_row(
+            "select label, source from section_labels where section = ?1",
+            [section],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
         .optional()?;
     if let Some(l) = kept {
         return Ok(l);
@@ -120,7 +122,9 @@ fn tf_idf(tf: usize, df: f64, all: f64) -> f64 {
 }
 
 fn all_chunks(db: &Connection) -> rusqlite::Result<f64> {
-    Ok(db.query_row("select count(*) from chunks", [], |r| r.get::<_, i64>(0))?.max(1) as f64)
+    Ok(db
+        .query_row("select count(*) from chunks", [], |r| r.get::<_, i64>(0))?
+        .max(1) as f64)
 }
 
 /// The best keywords of the scored ones, none holding another.
@@ -148,7 +152,9 @@ fn kg_keywords(db: &Connection, section: &str) -> rusqlite::Result<Vec<String>> 
          where c.section = ?1 group by e.eid",
     )?;
     let rows = st
-        .query_map([section], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?)))?
+        .query_map([section], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?, r.get::<_, i64>(2)?))
+        })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let scored = rows
         .into_iter()
@@ -180,7 +186,11 @@ fn term_keywords(db: &Connection, section: &str, keep: usize) -> rusqlite::Resul
         }
     }
     let mut terms: Vec<(String, usize)> = tf.into_values().collect();
-    terms.sort_by(|a, b| b.1.cmp(&a.1).then(b.0.chars().count().cmp(&a.0.chars().count())).then(a.0.cmp(&b.0)));
+    terms.sort_by(|a, b| {
+        b.1.cmp(&a.1)
+            .then(b.0.chars().count().cmp(&a.0.chars().count()))
+            .then(a.0.cmp(&b.0))
+    });
     terms.truncate(CANDIDATES);
     let all = all_chunks(db)?;
     // the chunks of the section's file: `<source>:<path>#...`
@@ -226,7 +236,9 @@ fn term_keywords(db: &Connection, section: &str, keep: usize) -> rusqlite::Resul
             continue;
         }
         if in_file >= 10 {
-            let here = count_in_file.query_row(params![expr, lo, hi, first, last], |r| r.get::<_, i64>(0)).unwrap_or(0);
+            let here = count_in_file
+                .query_row(params![expr, lo, hi, first, last], |r| r.get::<_, i64>(0))
+                .unwrap_or(0);
             if here as f64 > RUNNING_HEAD * in_file as f64 {
                 continue;
             }
@@ -249,7 +261,11 @@ pub fn hubs(db: &Connection, min_weight: f64, limit: usize) -> rusqlite::Result<
 }
 
 /// {section: {linked section: weight of the closest pair of their chunks}} for the given sections.
-pub fn links(db: &Connection, sections: &[String], min_weight: f64) -> rusqlite::Result<HashMap<String, HashMap<String, f64>>> {
+pub fn links(
+    db: &Connection,
+    sections: &[String],
+    min_weight: f64,
+) -> rusqlite::Result<HashMap<String, HashMap<String, f64>>> {
     let mut adj: HashMap<String, HashMap<String, f64>> = HashMap::new();
     for part in sections.chunks(500) {
         let sql = format!(
@@ -262,7 +278,9 @@ pub fn links(db: &Connection, sections: &[String], min_weight: f64) -> rusqlite:
         let mut args: Vec<rusqlite::types::Value> = part.iter().map(|s| s.clone().into()).collect();
         args.push(min_weight.into());
         let mut st = db.prepare(&sql)?;
-        let rows = st.query_map(params_from_iter(args), |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get(2)?)))?;
+        let rows = st.query_map(params_from_iter(args), |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get(2)?))
+        })?;
         for row in rows {
             let (a, b, w) = row?;
             adj.entry(a).or_default().insert(b, w);
@@ -275,7 +293,10 @@ pub fn links(db: &Connection, sections: &[String], min_weight: f64) -> rusqlite:
 pub fn chunk_counts(db: &Connection, sections: &[String]) -> rusqlite::Result<HashMap<String, i64>> {
     let mut out = HashMap::new();
     for part in sections.chunks(500) {
-        let sql = format!("select section, count(*) from chunks where section in ({}) group by section", marks(part.len()));
+        let sql = format!(
+            "select section, count(*) from chunks where section in ({}) group by section",
+            marks(part.len())
+        );
         let mut st = db.prepare(&sql)?;
         for row in st.query_map(params_from_iter(part), |r| Ok((r.get::<_, String>(0)?, r.get(1)?)))? {
             let (s, n) = row?;
@@ -297,7 +318,10 @@ pub fn text(db: &Connection, section: &str) -> rusqlite::Result<Option<(String, 
     let n = |id: &str| id.rsplit('#').next().and_then(|n| n.parse::<i64>().ok()).unwrap_or(0);
     rows.sort_by_key(|r| n(&r.0));
     let source = rows[0].1.clone();
-    Ok(Some((source, rows.into_iter().map(|r| r.2).collect::<Vec<_>>().join("\n\n"))))
+    Ok(Some((
+        source,
+        rows.into_iter().map(|r| r.2).collect::<Vec<_>>().join("\n\n"),
+    )))
 }
 
 #[cfg(test)]

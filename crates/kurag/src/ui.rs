@@ -19,8 +19,8 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::http::{ApiError, App, blocking, namespace_counts, same};
-use crate::store::Namespace;
 use crate::sections;
+use crate::store::Namespace;
 
 type S = State<Arc<App>>;
 
@@ -37,7 +37,10 @@ pub fn router(app: Arc<App>) -> Option<Router<Arc<App>>> {
             .route("/ui", get(|| file(INDEX, "text/html; charset=utf-8")))
             .route("/ui/app.js", get(|| file(APP_JS, "text/javascript; charset=utf-8")))
             .route("/ui/style.css", get(|| file(STYLE, "text/css; charset=utf-8")))
-            .route("/ui/vendor/cytoscape.min.js", get(|| file(CYTOSCAPE, "text/javascript; charset=utf-8")))
+            .route(
+                "/ui/vendor/cytoscape.min.js",
+                get(|| file(CYTOSCAPE, "text/javascript; charset=utf-8")),
+            )
             .route("/ui/namespaces", get(namespaces))
             .route("/ui/search/{namespace}", get(search))
             .route("/ui/hubs/{namespace}", get(hubs))
@@ -53,16 +56,30 @@ async fn file(body: &'static str, kind: &'static str) -> Response {
 
 async fn login(State(app): S, req: Request, next: Next) -> Response {
     let password = app.cfg.ui_password.as_deref().unwrap_or_default();
-    let want = format!("Basic {}", base64::engine::general_purpose::STANDARD.encode(format!("{}:{password}", app.cfg.ui_user)));
-    let got = req.headers().get(header::AUTHORIZATION).map(|v| v.as_bytes()).unwrap_or_default();
+    let want = format!(
+        "Basic {}",
+        base64::engine::general_purpose::STANDARD.encode(format!("{}:{password}", app.cfg.ui_user))
+    );
+    let got = req
+        .headers()
+        .get(header::AUTHORIZATION)
+        .map(|v| v.as_bytes())
+        .unwrap_or_default();
     if password.is_empty() || !same(got, want.as_bytes()) {
-        return (StatusCode::UNAUTHORIZED, [(header::WWW_AUTHENTICATE, "Basic realm=\"kurag\"")], "login required").into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            [(header::WWW_AUTHENTICATE, "Basic realm=\"kurag\"")],
+            "login required",
+        )
+            .into_response();
     }
     next.run(req).await
 }
 
 fn open(app: &App, name: &str) -> Result<Arc<Namespace>, ApiError> {
-    app.store.get(name, false)?.ok_or_else(|| ApiError::Status(StatusCode::NOT_FOUND, format!("no namespace {name}")))
+    app.store
+        .get(name, false)?
+        .ok_or_else(|| ApiError::Status(StatusCode::NOT_FOUND, format!("no namespace {name}")))
 }
 
 /// A section as the view shows it: its keywords as label (else its heading or page), its file, its heading or page.
@@ -96,7 +113,11 @@ fn twenty() -> usize {
 }
 
 /// The sections of the namespace whose chunks are closest to the text q, best first.
-async fn search(State(app): S, Path(name): Path<String>, Query(p): Query<SearchQuery>) -> Result<Json<Vec<Value>>, ApiError> {
+async fn search(
+    State(app): S,
+    Path(name): Path<String>,
+    Query(p): Query<SearchQuery>,
+) -> Result<Json<Vec<Value>>, ApiError> {
     let limit = p.limit.clamp(1, 100);
     let ns = {
         let (app, name) = (app.clone(), name.clone());
@@ -148,7 +169,11 @@ fn strong() -> f64 {
 }
 
 /// The sections with the most links at least min_weight similar: places to start without a search.
-async fn hubs(State(app): S, Path(name): Path<String>, Query(p): Query<HubsQuery>) -> Result<Json<Vec<Value>>, ApiError> {
+async fn hubs(
+    State(app): S,
+    Path(name): Path<String>,
+    Query(p): Query<HubsQuery>,
+) -> Result<Json<Vec<Value>>, ApiError> {
     blocking(move || {
         let ns = open(&app, &name)?;
         let inner = ns.lock();
@@ -185,7 +210,11 @@ fn sixty() -> usize {
 /// The section `key` and the sections linked to it at least `min_weight` similar, up to `depth` steps away and
 /// `limit` more sections (the strongest links first), with the edges between them. A whole big namespace
 /// (thousands of sections) is too many to lay out in a browser and too dense to read.
-async fn around(State(app): S, Path(name): Path<String>, Query(p): Query<AroundQuery>) -> Result<Json<Value>, ApiError> {
+async fn around(
+    State(app): S,
+    Path(name): Path<String>,
+    Query(p): Query<AroundQuery>,
+) -> Result<Json<Value>, ApiError> {
     let (depth, limit) = (p.depth.clamp(1, 3), p.limit.clamp(1, 300));
     blocking(move || {
         let ns = open(&app, &name)?;
@@ -248,7 +277,11 @@ struct SectionQuery {
 }
 
 /// The text of a section: its chunks in order.
-async fn section(State(app): S, Path(name): Path<String>, Query(p): Query<SectionQuery>) -> Result<Json<Value>, ApiError> {
+async fn section(
+    State(app): S,
+    Path(name): Path<String>,
+    Query(p): Query<SectionQuery>,
+) -> Result<Json<Value>, ApiError> {
     blocking(move || {
         let ns = open(&app, &name)?;
         let inner = ns.lock();

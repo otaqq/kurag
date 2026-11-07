@@ -9,17 +9,29 @@ use std::path::Path;
 use crate::{fts, store};
 
 const COPY: &[(&str, &str)] = &[
-    ("chunks", "insert into chunks(vid, id, section, source, text) select vid, id, section, source, text from src.chunks"),
+    (
+        "chunks",
+        "insert into chunks(vid, id, section, source, text) select vid, id, section, source, text from src.chunks",
+    ),
     ("vectors", "insert into vectors(vid, v) select vid, v from src.vectors"),
     ("edges", "insert into edges(a, b, w) select a, b, w from src.edges"),
-    ("entities", "insert into entities(eid, name, type, description) select eid, name, type, description from src.entities"),
+    (
+        "entities",
+        "insert into entities(eid, name, type, description) select eid, name, type, description from src.entities",
+    ),
     (
         "relations",
         "insert into relations(source, target, type, description, weight, chunk)
          select source, target, type, description, weight, chunk from src.relations",
     ),
-    ("mentions", "insert into mentions(eid, chunk) select eid, chunk from src.mentions"),
-    ("kg_done", "insert into kg_done(chunk, vid) select chunk, vid from src.kg_done"),
+    (
+        "mentions",
+        "insert into mentions(eid, chunk) select eid, chunk from src.mentions",
+    ),
+    (
+        "kg_done",
+        "insert into kg_done(chunk, vid) select chunk, vid from src.kg_done",
+    ),
 ];
 
 pub fn run(src: &Path, data: &Path) -> Result<(), String> {
@@ -40,11 +52,17 @@ pub fn run(src: &Path, data: &Path) -> Result<(), String> {
             continue;
         }
         let started = std::time::Instant::now();
-        let ns = st.get(&name, true).map_err(|e| format!("{name}: {e:?}"))?.expect("created");
+        let ns = st
+            .get(&name, true)
+            .map_err(|e| format!("{name}: {e:?}"))?
+            .expect("created");
         let result = (|| -> rusqlite::Result<(Vec<(String, i64)>, usize)> {
             let mut inner = ns.lock();
             let db = &inner.db;
-            db.execute("attach database ?1 as src", [src.join(&name).join("kura.db").to_string_lossy()])?;
+            db.execute(
+                "attach database ?1 as src",
+                [src.join(&name).join("kura.db").to_string_lossy()],
+            )?;
             let tx = db.unchecked_transaction()?;
             let mut counts = Vec::new();
             for (table, sql) in COPY {
@@ -52,11 +70,23 @@ pub fn run(src: &Path, data: &Path) -> Result<(), String> {
             }
             {
                 let mut rows = tx.prepare("select vid, text from chunks")?;
-                let rows = rows.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
-                fts::add(&tx, "fts", &rows.iter().map(|(v, t)| (*v, t.as_str())).collect::<Vec<_>>())?;
+                let rows = rows
+                    .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                fts::add(
+                    &tx,
+                    "fts",
+                    &rows.iter().map(|(v, t)| (*v, t.as_str())).collect::<Vec<_>>(),
+                )?;
                 let mut ents = tx.prepare("select eid, name || ' ' || description from entities")?;
-                let ents = ents.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
-                fts::add(&tx, "entities_fts", &ents.iter().map(|(e, t)| (*e, t.as_str())).collect::<Vec<_>>())?;
+                let ents = ents
+                    .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                fts::add(
+                    &tx,
+                    "entities_fts",
+                    &ents.iter().map(|(e, t)| (*e, t.as_str())).collect::<Vec<_>>(),
+                )?;
             }
             tx.commit()?;
             db.execute("detach database src", [])?;
@@ -69,7 +99,11 @@ pub fn run(src: &Path, data: &Path) -> Result<(), String> {
         match result {
             Ok((counts, vectors)) => {
                 let list: Vec<String> = counts.iter().map(|(t, n)| format!("{t} {n}")).collect();
-                eprintln!("{name}: {}; {vectors} vectors in memory; {:.1} s", list.join(", "), started.elapsed().as_secs_f64());
+                eprintln!(
+                    "{name}: {}; {vectors} vectors in memory; {:.1} s",
+                    list.join(", "),
+                    started.elapsed().as_secs_f64()
+                );
             }
             Err(e) => {
                 drop(ns);

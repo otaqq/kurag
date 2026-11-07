@@ -28,7 +28,11 @@ pub struct Range {
 
 impl Range {
     pub fn new(dims: usize) -> Range {
-        Range { min: vec![f32::INFINITY; dims], max: vec![f32::NEG_INFINITY; dims], count: 0 }
+        Range {
+            min: vec![f32::INFINITY; dims],
+            max: vec![f32::NEG_INFINITY; dims],
+            count: 0,
+        }
     }
 
     pub fn add(&mut self, v: &[f32]) {
@@ -52,11 +56,23 @@ impl Vectors {
         let dims = range.min.len();
         let (mut min, mut step) = (vec![0f32; dims], vec![0f32; dims]);
         for d in 0..dims {
-            let (lo, hi) = if range.count == 0 { (-1.0, 1.0) } else { (range.min[d], range.max[d]) };
+            let (lo, hi) = if range.count == 0 {
+                (-1.0, 1.0)
+            } else {
+                (range.min[d], range.max[d])
+            };
             min[d] = lo;
             step[d] = if hi > lo { (hi - lo) / 255.0 } else { f32::EPSILON };
         }
-        Vectors { dims, min, step, codes: Vec::new(), vids: Vec::new(), pos: HashMap::new(), trained_on: range.count }
+        Vectors {
+            dims,
+            min,
+            step,
+            codes: Vec::new(),
+            vids: Vec::new(),
+            pos: HashMap::new(),
+            trained_on: range.count,
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -75,7 +91,8 @@ impl Vectors {
         self.pos.insert(vid, self.vids.len());
         self.vids.push(vid);
         for (d, &x) in v.iter().enumerate() {
-            self.codes.push(((x - self.min[d]) / self.step[d]).round().clamp(0.0, 255.0) as u8);
+            self.codes
+                .push(((x - self.min[d]) / self.step[d]).round().clamp(0.0, 255.0) as u8);
         }
     }
 
@@ -121,7 +138,9 @@ impl Vectors {
             return Vec::new();
         }
         let p = self.prepare(q);
-        let mut all: Vec<(i64, f32)> = (0..self.vids.len()).map(|i| (self.vids[i], self.score_at(&p, i))).collect();
+        let mut all: Vec<(i64, f32)> = (0..self.vids.len())
+            .map(|i| (self.vids[i], self.score_at(&p, i)))
+            .collect();
         let by_score = |a: &(i64, f32), b: &(i64, f32)| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0));
         if all.len() > k {
             all.select_nth_unstable_by(k - 1, by_score);
@@ -148,7 +167,10 @@ mod tests {
     fn add_remove_nearest() {
         let mut v = index(&[(1, vec![1.0, 0.0]), (2, vec![0.0, 1.0]), (3, vec![0.6, 0.8])]);
         assert_eq!(v.trained_on(), 3);
-        assert_eq!(v.nearest(&[1.0, 0.0], 2).iter().map(|x| x.0).collect::<Vec<_>>(), [1, 3]);
+        assert_eq!(
+            v.nearest(&[1.0, 0.0], 2).iter().map(|x| x.0).collect::<Vec<_>>(),
+            [1, 3]
+        );
         v.remove(1);
         assert_eq!(v.len(), 2);
         assert_eq!(v.nearest(&[1.0, 0.0], 1)[0].0, 3);
@@ -161,8 +183,14 @@ mod tests {
     #[test]
     fn small_components_keep_precision() {
         // components around +-0.04, as in a 768-dimension unit vector: the error stays far below the gaps
-        let rows: Vec<(i64, Vec<f32>)> =
-            (0..50).map(|i| (i, (0..8).map(|d| (((i * 7 + d * 3) % 17) as f32 - 8.0) / 200.0).collect())).collect();
+        let rows: Vec<(i64, Vec<f32>)> = (0..50)
+            .map(|i| {
+                (
+                    i,
+                    (0..8).map(|d| (((i * 7 + d * 3) % 17) as f32 - 8.0) / 200.0).collect(),
+                )
+            })
+            .collect();
         let v = index(&rows);
         let q = &rows[10].1;
         for (vid, x) in &rows {

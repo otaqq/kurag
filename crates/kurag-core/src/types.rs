@@ -162,7 +162,11 @@ pub trait Check {
 }
 
 fn within(name: &str, v: usize, lo: usize, hi: usize) -> Result<(), String> {
-    if (lo..=hi).contains(&v) { Ok(()) } else { Err(format!("{name} must be {lo}..{hi}, not {v}")) }
+    if (lo..=hi).contains(&v) {
+        Ok(())
+    } else {
+        Err(format!("{name} must be {lo}..{hi}, not {v}"))
+    }
 }
 
 impl Check for Search {

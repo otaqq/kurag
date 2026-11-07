@@ -49,7 +49,10 @@ pub trait RemoteIndex: Send + Sync {
 pub const FILL_BATCH: usize = 500;
 
 fn client() -> reqwest::blocking::Client {
-    reqwest::blocking::Client::builder().timeout(Duration::from_secs(600)).build().expect("http client")
+    reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(600))
+        .build()
+        .expect("http client")
 }
 
 fn f32_b64(v: &[f32]) -> String {
@@ -62,19 +65,37 @@ fn post(http: &reqwest::blocking::Client, url: &str, body: &Value) -> Result<Val
     let status = r.status();
     let text = r.text().map_err(|e| format!("{url}: {e}"))?;
     if !status.is_success() {
-        return Err(format!("{url}: {status}: {}", text.chars().take(300).collect::<String>()));
+        return Err(format!(
+            "{url}: {status}: {}",
+            text.chars().take(300).collect::<String>()
+        ));
     }
-    if text.is_empty() { Ok(Value::Null) } else { serde_json::from_str(&text).map_err(|e| format!("{url}: {e}")) }
+    if text.is_empty() {
+        Ok(Value::Null)
+    } else {
+        serde_json::from_str(&text).map_err(|e| format!("{url}: {e}"))
+    }
 }
 
 /// The backend named by `VECTOR_BACKEND`; None for `memory`.
 pub fn from_settings(kind: &str, url: Option<&str>) -> std::result::Result<Option<Box<dyn RemoteIndex>>, String> {
-    let need_url = || url.map(|u| u.trim_end_matches('/').to_string()).ok_or(format!("VECTOR_BACKEND={kind} needs VECTOR_URL"));
+    let need_url = || {
+        url.map(|u| u.trim_end_matches('/').to_string())
+            .ok_or(format!("VECTOR_BACKEND={kind} needs VECTOR_URL"))
+    };
     match kind {
         "" | "memory" => Ok(None),
-        "txtai" => Ok(Some(Box::new(Txtai { url: need_url()?, http: client() }))),
-        "helixdb" => Ok(Some(Box::new(Helix { client: HelixClient::new(&need_url()?), indexed: Mutex::new(false) }))),
-        other => Err(format!("VECTOR_BACKEND: unknown backend {other:?} (memory, txtai, helixdb)")),
+        "txtai" => Ok(Some(Box::new(Txtai {
+            url: need_url()?,
+            http: client(),
+        }))),
+        "helixdb" => Ok(Some(Box::new(Helix {
+            client: HelixClient::new(&need_url()?),
+            indexed: Mutex::new(false),
+        }))),
+        other => Err(format!(
+            "VECTOR_BACKEND: unknown backend {other:?} (memory, txtai, helixdb)"
+        )),
     }
 }
 
@@ -110,7 +131,12 @@ impl RemoteIndex for Txtai {
         }
         let ids: Vec<i64> = items.iter().map(|i| i.0).collect();
         let flat: Vec<f32> = items.iter().flat_map(|i| i.1.iter().copied()).collect();
-        post(&self.http, &self.at(ns, "add"), &json!({"ids": ids, "dims": items[0].1.len(), "vectors": f32_b64(&flat)})).map(|_| ())
+        post(
+            &self.http,
+            &self.at(ns, "add"),
+            &json!({"ids": ids, "dims": items[0].1.len(), "vectors": f32_b64(&flat)}),
+        )
+        .map(|_| ())
     }
 
     fn fill(&self, ns: &str, items: &[(i64, &[f32])]) -> Result<()> {
@@ -135,10 +161,18 @@ impl RemoteIndex for Txtai {
     }
 
     fn nearest(&self, ns: &str, q: &[f32], k: usize) -> Result<Vec<(i64, f32)>> {
-        let r = post(&self.http, &self.at(ns, "search"), &json!({"vector": f32_b64(q), "k": k}))?;
+        let r = post(
+            &self.http,
+            &self.at(ns, "search"),
+            &json!({"vector": f32_b64(q), "k": k}),
+        )?;
         Ok(r["hits"]
             .as_array()
-            .map(|a| a.iter().filter_map(|h| Some((h[0].as_i64()?, h[1].as_f64()? as f32))).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|h| Some((h[0].as_i64()?, h[1].as_f64()? as f32)))
+                    .collect()
+            })
             .unwrap_or_default())
     }
 }
@@ -171,7 +205,10 @@ const HELIX_EDGE_CANDIDATES: usize = 100;
 
 impl HelixClient {
     pub fn new(url: &str) -> HelixClient {
-        HelixClient { url: url.trim_end_matches('/').to_string(), http: client() }
+        HelixClient {
+            url: url.trim_end_matches('/').to_string(),
+            http: client(),
+        }
     }
 
     /// A request, again while HelixDB answers that it may be retried (a transaction conflict between
@@ -204,7 +241,12 @@ impl HelixClient {
     }
 
     fn create_index(&self, name: &str, spec: Value) -> Result<()> {
-        self.native("write", name, json!({"create_index": {"spec": spec, "if_not_exists": true}})).map(|_| ())
+        self.native(
+            "write",
+            name,
+            json!({"create_index": {"spec": spec, "if_not_exists": true}}),
+        )
+        .map(|_| ())
     }
 
     /// The rows of a Cypher answer.
@@ -228,7 +270,10 @@ impl Helix {
                    "tenant_property": "ns"}}),
         )?;
         for property in ["ns", "vid"] {
-            self.client.create_index("equality_index", json!({"node_equality": {"label": HELIX_LABEL, "property": property, "unique": false}}))?;
+            self.client.create_index(
+                "equality_index",
+                json!({"node_equality": {"label": HELIX_LABEL, "property": property, "unique": false}}),
+            )?;
         }
         let mut probe = vec![0.0f32; dims];
         probe[0] = 1.0;
@@ -263,7 +308,11 @@ impl Helix {
         let r = self.search(ns, q, candidates)?;
         let mut hits: Vec<(i64, f32)> = r["hits"]
             .as_array()
-            .map(|a| a.iter().filter_map(|h| Some((h["vid"].as_i64()?, 1.0 - h["$distance"].as_f64()? as f32))).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|h| Some((h["vid"].as_i64()?, 1.0 - h["$distance"].as_f64()? as f32)))
+                    .collect()
+            })
             .unwrap_or_default();
         hits.truncate(k);
         Ok(hits)
@@ -276,12 +325,20 @@ impl RemoteIndex for Helix {
     }
 
     fn count(&self, ns: &str) -> Result<usize> {
-        let r = self.client.cypher(&format!("MATCH (c:{HELIX_LABEL} {{ns: $ns}}) RETURN count(c) AS n"), json!({"ns": ns}))?;
+        let r = self.client.cypher(
+            &format!("MATCH (c:{HELIX_LABEL} {{ns: $ns}}) RETURN count(c) AS n"),
+            json!({"ns": ns}),
+        )?;
         Ok(r["rows"][0][0].as_u64().unwrap_or(0) as usize)
     }
 
     fn clear(&self, ns: &str) -> Result<()> {
-        self.client.cypher(&format!("MATCH (c:{HELIX_LABEL} {{ns: $ns}}) DETACH DELETE c"), json!({"ns": ns})).map(|_| ())
+        self.client
+            .cypher(
+                &format!("MATCH (c:{HELIX_LABEL} {{ns: $ns}}) DETACH DELETE c"),
+                json!({"ns": ns}),
+            )
+            .map(|_| ())
     }
 
     fn add(&self, ns: &str, items: &[(i64, &[f32])]) -> Result<()> {
@@ -306,11 +363,12 @@ impl RemoteIndex for Helix {
         if vids.is_empty() {
             return Ok(());
         }
-        self.client.cypher(
-            &format!("MATCH (c:{HELIX_LABEL} {{ns: $ns}}) WHERE c.vid IN $vids DETACH DELETE c"),
-            json!({"ns": ns, "vids": vids}),
-        )
-        .map(|_| ())
+        self.client
+            .cypher(
+                &format!("MATCH (c:{HELIX_LABEL} {{ns: $ns}}) WHERE c.vid IN $vids DETACH DELETE c"),
+                json!({"ns": ns, "vids": vids}),
+            )
+            .map(|_| ())
     }
 
     fn nearest(&self, ns: &str, q: &[f32], k: usize) -> Result<Vec<(i64, f32)>> {
@@ -370,7 +428,10 @@ pub fn graph_from_settings(kind: &str, url: Option<&str>) -> std::result::Result
         "" | "sqlite" => Ok(None),
         "helixdb" => {
             let url = url.ok_or("GRAPH_BACKEND=helixdb needs GRAPH_URL")?;
-            Ok(Some(Box::new(HelixGraph { client: HelixClient::new(url), indexed: Mutex::new(false) })))
+            Ok(Some(Box::new(HelixGraph {
+                client: HelixClient::new(url),
+                indexed: Mutex::new(false),
+            })))
         }
         other => Err(format!("GRAPH_BACKEND: unknown backend {other:?} (sqlite, helixdb)")),
     }
@@ -491,12 +552,18 @@ impl GraphStore for HelixGraph {
 
     fn set_version(&self, ns: &str, version: i64) -> Result<()> {
         self.write("MATCH (m:KGMeta {ns: $ns}) DELETE m", json!({"ns": ns}))?;
-        self.write("CREATE (:KGMeta {ns: $ns, version: $v})", json!({"ns": ns, "v": version}))
+        self.write(
+            "CREATE (:KGMeta {ns: $ns, version: $v})",
+            json!({"ns": ns, "v": version}),
+        )
     }
 
     fn clear(&self, ns: &str) -> Result<()> {
         for label in ["KGChunk", "KGEntity", "KGMeta"] {
-            self.write(&format!("MATCH (n:{label} {{ns: $ns}}) DETACH DELETE n"), json!({"ns": ns}))?;
+            self.write(
+                &format!("MATCH (n:{label} {{ns: $ns}}) DETACH DELETE n"),
+                json!({"ns": ns}),
+            )?;
         }
         Ok(())
     }
@@ -504,14 +571,20 @@ impl GraphStore for HelixGraph {
     fn add_chunks(&self, ns: &str, chunks: &[(i64, String)]) -> Result<()> {
         for part in chunks.chunks(GRAPH_BATCH) {
             let rows: Vec<Value> = part.iter().map(|(vid, id)| json!({"vid": vid, "id": id})).collect();
-            self.write("UNWIND $rows AS r CREATE (:KGChunk {ns: $ns, vid: r.vid, id: r.id})", json!({"ns": ns, "rows": rows}))?;
+            self.write(
+                "UNWIND $rows AS r CREATE (:KGChunk {ns: $ns, vid: r.vid, id: r.id})",
+                json!({"ns": ns, "rows": rows}),
+            )?;
         }
         Ok(())
     }
 
     fn remove_chunks(&self, ns: &str, vids: &[i64]) -> Result<()> {
         for part in vids.chunks(GRAPH_BATCH) {
-            self.write("MATCH (c:KGChunk) WHERE c.vid IN $vids WITH c WHERE c.ns = $ns DETACH DELETE c", json!({"ns": ns, "vids": part}))?;
+            self.write(
+                "MATCH (c:KGChunk) WHERE c.vid IN $vids WITH c WHERE c.ns = $ns DETACH DELETE c",
+                json!({"ns": ns, "vids": part}),
+            )?;
         }
         Ok(())
     }
@@ -532,14 +605,20 @@ impl GraphStore for HelixGraph {
         new.sort_unstable();
         new.dedup();
         for part in new.chunks(GRAPH_BATCH) {
-            self.write("UNWIND $eids AS e CREATE (:KGEntity {ns: $ns, eid: e})", json!({"ns": ns, "eids": part}))?;
+            self.write(
+                "UNWIND $eids AS e CREATE (:KGEntity {ns: $ns, eid: e})",
+                json!({"ns": ns, "eids": part}),
+            )?;
         }
         Ok(())
     }
 
     fn remove_entities(&self, ns: &str, eids: &[i64]) -> Result<()> {
         for part in eids.chunks(GRAPH_BATCH) {
-            self.write("MATCH (e:KGEntity) WHERE e.eid IN $eids WITH e WHERE e.ns = $ns DETACH DELETE e", json!({"ns": ns, "eids": part}))?;
+            self.write(
+                "MATCH (e:KGEntity) WHERE e.eid IN $eids WITH e WHERE e.ns = $ns DETACH DELETE e",
+                json!({"ns": ns, "eids": part}),
+            )?;
         }
         Ok(())
     }
@@ -550,7 +629,11 @@ impl GraphStore for HelixGraph {
         let rows: Vec<(i64, i64, Vec<(&str, Value)>)> = relations
             .iter()
             .filter_map(|(s, t, ty, w, c)| {
-                Some((*id.get(s)?, *id.get(t)?, vec![("type", json!(ty)), ("weight", json!(*w as f64)), ("chunk", json!(c))]))
+                Some((
+                    *id.get(s)?,
+                    *id.get(t)?,
+                    vec![("type", json!(ty)), ("weight", json!(*w as f64)), ("chunk", json!(c))],
+                ))
             })
             .collect();
         self.add_edges_by_id("RELATES", &rows)
@@ -586,19 +669,30 @@ impl GraphStore for HelixGraph {
 
     fn forget_range(&self, ns: &str, lo: &str, hi: Option<&str>) -> Result<()> {
         let (cond_r, cond_m) = match hi {
-            Some(_) => ("x.chunk <> '' AND x.chunk >= $lo AND x.chunk < $hi", "c.id >= $lo AND c.id < $hi"),
+            Some(_) => (
+                "x.chunk <> '' AND x.chunk >= $lo AND x.chunk < $hi",
+                "c.id >= $lo AND c.id < $hi",
+            ),
             None => ("x.chunk <> '' AND x.chunk >= $lo", "c.id >= $lo"),
         };
         let p = json!({"ns": ns, "lo": lo, "hi": hi});
-        self.write(&format!("MATCH (:KGEntity {{ns: $ns}})-[x:RELATES]->(:KGEntity) WHERE {cond_r} DELETE x"), p.clone())?;
-        self.write(&format!("MATCH (c:KGChunk {{ns: $ns}})-[m:MENTIONS]->(:KGEntity) WHERE {cond_m} DELETE m"), p)
+        self.write(
+            &format!("MATCH (:KGEntity {{ns: $ns}})-[x:RELATES]->(:KGEntity) WHERE {cond_r} DELETE x"),
+            p.clone(),
+        )?;
+        self.write(
+            &format!("MATCH (c:KGChunk {{ns: $ns}})-[m:MENTIONS]->(:KGEntity) WHERE {cond_m} DELETE m"),
+            p,
+        )
     }
 
     fn add_mentions(&self, ns: &str, mentions: &[(i64, i64)]) -> Result<()> {
         let chunk = self.node_ids("KGChunk", "vid", ns, &mentions.iter().map(|m| m.1).collect::<Vec<_>>())?;
         let entity = self.node_ids("KGEntity", "eid", ns, &mentions.iter().map(|m| m.0).collect::<Vec<_>>())?;
-        let rows: Vec<(i64, i64, Vec<(&str, Value)>)> =
-            mentions.iter().filter_map(|(e, v)| Some((*chunk.get(v)?, *entity.get(e)?, Vec::new()))).collect();
+        let rows: Vec<(i64, i64, Vec<(&str, Value)>)> = mentions
+            .iter()
+            .filter_map(|(e, v)| Some((*chunk.get(v)?, *entity.get(e)?, Vec::new())))
+            .collect();
         self.add_edges_by_id("MENTIONS", &rows)
     }
 
@@ -624,7 +718,10 @@ impl GraphStore for HelixGraph {
                  MATCH (a)-[e:SIMILAR]-(b:KGChunk) WHERE e.w >= $min RETURN b.vid AS b, e.w AS w, a.vid AS a",
                 json!({"ns": ns, "vids": part, "min": min_weight}),
             )?;
-            out.extend(rows.iter().map(|r| (int(&r[0]), r[1].as_f64().unwrap_or(0.0), int(&r[2]))));
+            out.extend(
+                rows.iter()
+                    .map(|r| (int(&r[0]), r[1].as_f64().unwrap_or(0.0), int(&r[2]))),
+            );
         }
         Ok(out)
     }
@@ -635,7 +732,10 @@ impl GraphStore for HelixGraph {
         }
         // both directions, each anchored on an indexed list (an OR of the two would scan)
         let mut best: HashMap<(i64, i64, String), f64> = HashMap::new();
-        for pattern in ["(a)-[x:RELATES]->(o:KGEntity) RETURN a.eid, o.eid", "(o:KGEntity)-[x:RELATES]->(a) RETURN o.eid, a.eid"] {
+        for pattern in [
+            "(a)-[x:RELATES]->(o:KGEntity) RETURN a.eid, o.eid",
+            "(o:KGEntity)-[x:RELATES]->(a) RETURN o.eid, a.eid",
+        ] {
             let (path, ret) = pattern.split_once(" RETURN ").expect("pattern");
             let rows = self.read(
                 &format!(
@@ -652,7 +752,12 @@ impl GraphStore for HelixGraph {
             }
         }
         let mut out: Vec<(i64, i64, String, f64)> = best.into_iter().map(|((s, t, ty), w)| (s, t, ty, w)).collect();
-        out.sort_by(|a, b| b.3.total_cmp(&a.3).then(a.0.cmp(&b.0)).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+        out.sort_by(|a, b| {
+            b.3.total_cmp(&a.3)
+                .then(a.0.cmp(&b.0))
+                .then(a.1.cmp(&b.1))
+                .then(a.2.cmp(&b.2))
+        });
         out.truncate(limit);
         Ok(out)
     }

@@ -20,13 +20,21 @@ struct Server {
 impl Server {
     fn from_env(p: &str) -> Server {
         let url = std::env::var(format!("{p}_URL")).unwrap_or_else(|_| panic!("set {p}_URL"));
-        Server { url: url.trim_end_matches('/').into(), key: std::env::var(format!("{p}_KEY")).unwrap_or_default() }
+        Server {
+            url: url.trim_end_matches('/').into(),
+            key: std::env::var(format!("{p}_KEY")).unwrap_or_default(),
+        }
     }
 
     /// The ids of the results (chunk ids; for /kg/search entity names and "source|type|target" of relations).
     async fn ask(&self, http: &reqwest::Client, path: &str, body: &Value) -> (Vec<String>, f64) {
         let t = Instant::now();
-        let r = http.post(format!("{}{path}", self.url)).header("X-API-Key", &self.key).json(body).send().await;
+        let r = http
+            .post(format!("{}{path}", self.url))
+            .header("X-API-Key", &self.key)
+            .json(body)
+            .send()
+            .await;
         let ms = t.elapsed().as_secs_f64() * 1000.0;
         let v: Value = match r {
             Ok(r) if r.status().is_success() => r.json().await.unwrap_or_default(),
@@ -36,10 +44,19 @@ impl Server {
         let ids = match v.as_array() {
             Some(hits) => hits.iter().filter_map(|h| h["id"].as_str().map(String::from)).collect(),
             None => {
-                let mut out: Vec<String> = v["entities"].as_array().into_iter().flatten()
-                    .filter_map(|e| e["name"].as_str().map(String::from)).collect();
+                let mut out: Vec<String> = v["entities"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|e| e["name"].as_str().map(String::from))
+                    .collect();
                 out.extend(v["relations"].as_array().into_iter().flatten().map(|r| {
-                    format!("{}|{}|{}", r["source"].as_str().unwrap_or(""), r["type"].as_str().unwrap_or(""), r["target"].as_str().unwrap_or(""))
+                    format!(
+                        "{}|{}|{}",
+                        r["source"].as_str().unwrap_or(""),
+                        r["type"].as_str().unwrap_or(""),
+                        r["target"].as_str().unwrap_or("")
+                    )
                 }));
                 out
             }
@@ -50,7 +67,9 @@ impl Server {
 
 fn pct(v: &mut [f64], p: f64) -> f64 {
     v.sort_by(f64::total_cmp);
-    v.get(((v.len() as f64 - 1.0) * p).round() as usize).copied().unwrap_or(0.0)
+    v.get(((v.len() as f64 - 1.0) * p).round() as usize)
+        .copied()
+        .unwrap_or(0.0)
 }
 
 #[tokio::main]
@@ -60,7 +79,12 @@ async fn main() {
         eprintln!("usage: compare <questions.tsv> [vector,text,hybrid]   (A_URL A_KEY B_URL B_KEY)");
         std::process::exit(2);
     };
-    let modes: Vec<String> = args.get(1).map_or("vector,text,hybrid", |s| s.as_str()).split(',').map(String::from).collect();
+    let modes: Vec<String> = args
+        .get(1)
+        .map_or("vector,text,hybrid", |s| s.as_str())
+        .split(',')
+        .map(String::from)
+        .collect();
     let questions: Vec<(String, String)> = std::fs::read_to_string(path)
         .expect("questions")
         .lines()
@@ -76,10 +100,22 @@ async fn main() {
         let mut differing = Vec::new();
         for (i, (ns, q)) in questions.iter().enumerate() {
             let (path, body) = match mode.as_str() {
-                "graph" => ("/search", json!({"query": q, "namespaces": [ns], "mode": "hybrid", "limit": 5, "graph": 5})),
-                "kg" => ("/search", json!({"query": q, "namespaces": [ns], "mode": "hybrid", "limit": 5, "kg": 2})),
-                "kgsearch" => ("/kg/search", json!({"query": q, "namespaces": [ns], "depth": 2, "limit": 10})),
-                m => ("/search", json!({"query": q, "namespaces": [ns], "mode": m, "limit": 5})),
+                "graph" => (
+                    "/search",
+                    json!({"query": q, "namespaces": [ns], "mode": "hybrid", "limit": 5, "graph": 5}),
+                ),
+                "kg" => (
+                    "/search",
+                    json!({"query": q, "namespaces": [ns], "mode": "hybrid", "limit": 5, "kg": 2}),
+                ),
+                "kgsearch" => (
+                    "/kg/search",
+                    json!({"query": q, "namespaces": [ns], "depth": 2, "limit": 10}),
+                ),
+                m => (
+                    "/search",
+                    json!({"query": q, "namespaces": [ns], "mode": m, "limit": 5}),
+                ),
             };
             // alternate the order, so neither server always gets the cache warmed by the other
             let ((ha, ma), (hb, mb)) = if i % 2 == 0 {

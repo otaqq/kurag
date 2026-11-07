@@ -67,7 +67,11 @@ impl Api {
 
     /// `name` under this test's root (`""` is the root itself).
     pub fn ns(&self, name: &str) -> String {
-        if name.is_empty() { self.root.clone() } else { format!("{}.{name}", self.root) }
+        if name.is_empty() {
+            self.root.clone()
+        } else {
+            format!("{}.{name}", self.root)
+        }
     }
 
     async fn send(&self, req: reqwest::RequestBuilder) -> (u16, Value) {
@@ -79,7 +83,13 @@ impl Api {
 
     /// POST with the API key; the status and the answer.
     pub async fn post_status(&self, path: &str, body: Value) -> (u16, Value) {
-        self.send(self.http.post(format!("{}{path}", self.url)).header("X-API-Key", &self.key).json(&body)).await
+        self.send(
+            self.http
+                .post(format!("{}{path}", self.url))
+                .header("X-API-Key", &self.key)
+                .json(&body),
+        )
+        .await
     }
 
     /// POST with the API key; the answer, which must be 200.
@@ -100,18 +110,24 @@ impl Api {
 
     /// Upsert into `ns(name)`; the answer.
     pub async fn upsert(&self, name: &str, docs: Value) -> Value {
-        self.post("/upsert", json!({"namespace": self.ns(name), "documents": docs})).await
+        self.post("/upsert", json!({"namespace": self.ns(name), "documents": docs}))
+            .await
     }
 
     /// Delete prefixes from `ns(name)`; the answer.
     pub async fn delete(&self, name: &str, prefixes: &[&str]) -> Value {
-        self.post("/delete", json!({"namespace": self.ns(name), "prefixes": prefixes})).await
+        self.post("/delete", json!({"namespace": self.ns(name), "prefixes": prefixes}))
+            .await
     }
 
     /// `/search`; namespaces default to this test's root, and given ones are taken under it.
     pub async fn search(&self, mut body: Value) -> Vec<Value> {
         self.scope(&mut body);
-        self.post("/search", body).await.as_array().expect("search answers a list").clone()
+        self.post("/search", body)
+            .await
+            .as_array()
+            .expect("search answers a list")
+            .clone()
     }
 
     /// `/kg/search`, scoped like `search`.
@@ -140,7 +156,11 @@ impl Api {
             .expect("namespaces answers an object")
             .iter()
             .filter_map(|(name, count)| {
-                let short = if *name == self.root { Some("") } else { name.strip_prefix(&prefix) };
+                let short = if *name == self.root {
+                    Some("")
+                } else {
+                    name.strip_prefix(&prefix)
+                };
                 short.map(|s| (s.to_string(), count.as_i64().unwrap()))
             })
             .collect()
@@ -149,7 +169,11 @@ impl Api {
 
 /// Documents `<prefix>#0`, `<prefix>#1`, ... with the texts, source = prefix.
 pub fn docs(prefix: &str, texts: &[&str]) -> Value {
-    texts.iter().enumerate().map(|(i, t)| json!({"id": format!("{prefix}#{i}"), "text": t, "source": prefix})).collect()
+    texts
+        .iter()
+        .enumerate()
+        .map(|(i, t)| json!({"id": format!("{prefix}#{i}"), "text": t, "source": prefix}))
+        .collect()
 }
 
 /// Ids of the hits, in order.

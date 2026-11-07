@@ -52,7 +52,9 @@ impl Config {
     pub fn from_env() -> Result<Config, String> {
         Ok(Config {
             listen: var("LISTEN").unwrap_or_else(|| "0.0.0.0:9650".into()),
-            data_dir: var("DATA_DIR").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("data")),
+            data_dir: var("DATA_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("data")),
             // an empty key would let every request in
             api_key: var("API_KEY").ok_or("set API_KEY (clients send it in the X-API-Key header)")?,
             embed_url: var("EMBED_URL").ok_or("set EMBED_URL (an OpenAI-compatible API, e.g. http://host:4000/v1)")?,
