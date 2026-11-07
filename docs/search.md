@@ -244,6 +244,14 @@ data, one per backend:
 | filling the copy | | 166 s |
 | memory | in kurag (59 MB) | kurag 58 MB + server 338–409 MiB |
 
+The same on a machine with a local SSD under both (HelixDB's own diagnostics: "local SSD", no warning), p50:
+graph 47 / 68 ms, kg 55 / 208 ms, `/kg/search` 6 / 108 ms (SQLite / HelixDB); filling 160 s; HelixDB 395–669 MiB.
+The SSD made HelixDB a fifth to a third faster, not as fast as SQLite. Where the time goes, query by query on that
+machine: an empty query (`RETURN 1`) takes 1.5 ms over HTTP; looking up 5 entities by an indexed id list 39 ms;
+one step of relations from them 165–235 ms; the chunks mentioning them 255 ms. A depth-2 `/kg/search` sends four
+or five such queries. So the cost is HelixDB reading node by node in this version and this use, not the disk and
+not the round trips; SQLite answers the same from tables in the page cache in about a millisecond.
+
 At this size HelixDB gives the same answers and is slower; its use is graphs that outgrow one process's tables and
 walks SQL does badly. The production set has about seven times these edges (2.5 million); filling and memory there
 are not measured.
