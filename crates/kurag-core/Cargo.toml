@@ -1,6 +1,6 @@
 [package]
 name = "kurag-core"
-version = "0.1.0"
+version = "0.2.0"
 description = "The rules of kurag: tokenizer (words + CJK bigrams), scoring and fusion, chunk ids, API types"
 edition.workspace = true
 license.workspace = true
