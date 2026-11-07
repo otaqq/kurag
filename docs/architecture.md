@@ -4,7 +4,7 @@ How kurag is put together. Why it is built this way, and what it does, is in [de
 works inside (terms, scores, quantization, graphs) is in [search.md](search.md). Parts marked
 *to measure* wait for numbers; what is built so far is listed under "State".
 
-## State (v0.4.0)
+## State (v0.4.1)
 
 Built: `kurag-core` (tokenizer, scores, ids and namespaces, API types) and the `kurag` server with every API v1
 route, and the graph view (`/ui`, the txtai-kura view ported, nodes labelled with keywords: search.md, "Graph view
