@@ -10,7 +10,7 @@ Docs: this file (why and what), [architecture.md](architecture.md) (parts, state
 
 ## Why
 
-txtai-kura (the Python server kurag replaces, built on txtai; not published) showed that most of such a server is not
+txtai-kura (the Python server kurag replaced, built on txtai; retired and never published) showed that most of such a server is not
 the database engine.
 Of its ~1,160 lines of Python, one import uses txtai (the faiss wrapper); the rest is the layer on top:
 cutting Japanese into bigrams, scoring and fusing hits, chunk id rules, prefix deletes, knowledge graph
@@ -35,6 +35,11 @@ flowchart TD
     bm25["full-text index<br/>FTS5, Tantivy, ..."]
   end
 ```
+
+txtai can still be the ANN engine (`backends/txtai`). What kurag adds over an engine such as txtai is the layer above:
+full-text scoring for Japanese and other languages without spaces (words + CJK bigrams, coverage + BM25), stable chunk
+ids with delete by prefix, namespaces searched as a tree, knowledge graph bookkeeping (`/kg/todo` and done marks, so
+extraction can stop and resume), and the graph view.
 
 Goals, in order:
 
