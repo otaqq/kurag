@@ -284,7 +284,7 @@ flowchart LR
   the absolute path, 32>.json` with size and mtime; JSON floats are read exactly, `float_roundtrip`, or no cached
   mtime would match).
 - **State**: `<data>/state/state.json` (part -> sha, namespace, chunks; saved after every batch of 200 chunks),
-  `files.json` (file -> size, mtime_ns, namespace: unchanged files are not opened), `runs.json` (for `--due`:
+  `files.json` (file -> size, mtime_ns, namespace, hash of the text settings: unchanged files are not opened), `runs.json` (for `--due`:
   `cron` "min hour day month weekday" once in a matching hour, or `every` / `at`; per source or per
   `[kinds.<kind>]`), `lock` (one run at a time; a second waits up to 30 minutes). Nothing is deleted as gone after
   a run stopped by `max_minutes`; with errors, files.json is not updated, so changed files are read again.

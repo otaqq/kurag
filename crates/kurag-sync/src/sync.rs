@@ -6,7 +6,7 @@
 //! is not even opened (files.json). The state files are txtai-kura-sync's, so a setup moves over without sending
 //! anything again:
 //!   <data>/state/state.json  part key -> {sha, namespace, chunks}
-//!   <data>/state/files.json  "<source>:<file>" -> [size, mtime_ns, namespace] when it was last sent
+//!   <data>/state/files.json  "<source>:<file>" -> [size, mtime_ns, namespace, text settings] when it was last sent
 //!   <data>/state/runs.json   source -> start time of its last run without errors (for --due)
 //!   <data>/state/lock        one run at a time
 //!   <data>/cache/git/<name>  git work trees; <data>/cache/text/ PDF and EPUB text (read.rs)
@@ -701,6 +701,12 @@ fn fetch_git(src: &Table, env: &HashMap<String, String>, paths: &Paths) -> Resul
     Ok(dest)
 }
 
+/// A hash of the settings that go into a part's text. It is part of a file's stamp, so a file whose text would change
+/// although the file did not is read again.
+fn text_settings(label: &str, words: &Words) -> String {
+    sha256_hex(&format!("{label}\0{}\0{}", words.intro, words.source))
+}
+
 fn label_of(src: &Table) -> String {
     match s(src, "label") {
         Some(l) => l.to_string(),
@@ -841,6 +847,7 @@ pub fn run(
         }
         let prefix = format!("{name}:");
         let label = label_of(src);
+        let settings = text_settings(&label, words);
         let mut seen: HashSet<String> = HashSet::new();
         let mut pending: Vec<Pending> = Vec::new();
         let before = errors;
@@ -922,7 +929,7 @@ pub fn run(
                 use std::os::unix::fs::MetadataExt;
                 meta.mtime() as i128 * 1_000_000_000 + meta.mtime_nsec() as i128
             };
-            let stamp = json!([meta.len(), mtime_ns as i64, ns]);
+            let stamp = json!([meta.len(), mtime_ns as i64, ns, settings]);
             let fkey = format!("{prefix}{rel}");
             if file_stamps.get(&fkey) == Some(&stamp) {
                 // unchanged since it was last sent: not even opened
@@ -1243,6 +1250,23 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
+    }
+
+    #[test]
+    fn text_settings_follow_label_and_words() {
+        let base = text_settings("a", &Words::default());
+        assert_eq!(base, text_settings("a", &Words::default()));
+        assert_ne!(base, text_settings("b", &Words::default()));
+        let source = Words {
+            source: "From: {where}".into(),
+            ..Words::default()
+        };
+        assert_ne!(base, text_settings("a", &source));
+        let intro = Words {
+            intro: "(start)".into(),
+            ..Words::default()
+        };
+        assert_ne!(base, text_settings("a", &intro));
     }
 
     #[test]

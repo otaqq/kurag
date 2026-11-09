@@ -180,7 +180,7 @@ left off.
 | Path | Holds |
 |---|---|
 | `state/state.json` | part key -> sha256 of its text, namespace, chunk count (what was sent) |
-| `state/files.json` | `<source>:<path>` -> size, mtime (ns), namespace: unchanged files are not opened |
+| `state/files.json` | `<source>:<path>` -> size, mtime (ns), namespace, hash of the text settings (`label`, `[text]`): unchanged files are not opened. Changing one of those settings reads the source's files again and sends the parts whose text changed |
 | `state/runs.json` | source -> start of its last run without errors (for `--due`) |
 | `state/lock` | one run at a time; a second waits up to 30 minutes |
 | `cache/text/` | extracted PDF and EPUB text, until the file's size or time changes |
