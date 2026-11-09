@@ -3,8 +3,8 @@ name: kurag
 description: Retrieval server for RAG - vector, full-text and hybrid search, a similarity graph and a knowledge graph behind one HTTP API
 type: application
 # Both follow the version in Cargo.toml; release.yml checks that they match the tag
-version: 0.4.2
-appVersion: "0.4.2"
+version: 0.4.3
+appVersion: "0.4.3"
 home: https://github.com/otaqq/kurag
 sources:
   - https://github.com/otaqq/kurag

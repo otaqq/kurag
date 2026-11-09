@@ -6,7 +6,7 @@ resources and development each have their own page ([api.md](api.md), [configura
 [deployment.md](deployment.md), [operations.md](operations.md), [development.md](development.md)). Parts marked
 *to measure* wait for numbers; what is built so far is listed under "State".
 
-## State (v0.4.2)
+## State (v0.4.3)
 
 Built: `kurag-core` (tokenizer, scores, ids and namespaces, API types) and the `kurag` server with every API v1
 route, and the graph view (`/ui`, the txtai-kura view ported, nodes labelled with keywords: search.md, "Graph view
