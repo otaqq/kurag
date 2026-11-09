@@ -143,6 +143,12 @@ Read after the sources file, for what should not be in version control (private 
 with the same name replaces the shared one, new names are added after the shared ones; `[rag]`, `[text]`,
 `[extract]` and `[kinds]` keys replace the shared ones; `walls` replaces the list.
 
+### Leaving a note out
+
+A Markdown file whose YAML front matter has the top-level property `rag: false` is not indexed, in every source type.
+A file that was indexed before is removed on the next run, like a deleted file; removing the property adds it again.
+Other values, and files that are not Markdown, are not affected.
+
 ### `.rag.toml` (folder settings in shelf sources)
 
 ```toml

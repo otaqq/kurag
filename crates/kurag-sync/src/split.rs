@@ -117,6 +117,31 @@ pub fn split_pages(text: &str, w: &Words, label: &str, rel: &str, unit: &str) ->
     out
 }
 
+/// Whether a Markdown file's YAML front matter says `rag: false`. Only that top-level line is looked at, so no YAML
+/// parser is needed. A front matter that is never closed is not one.
+fn left_out(text: &str) -> bool {
+    let mut lines = text.trim_start_matches('\u{feff}').lines();
+    if lines.next().map(str::trim_end) != Some("---") {
+        return false;
+    }
+    let mut found = false;
+    for line in lines {
+        let line = line.trim_end();
+        if line == "---" || line == "..." {
+            return found;
+        }
+        if let Some(value) = line.strip_prefix("rag:") {
+            found = value
+                .split(" #")
+                .next()
+                .unwrap_or("")
+                .trim()
+                .eq_ignore_ascii_case("false");
+        }
+    }
+    false
+}
+
 /// {part key: text} of one file: Markdown by section ("<path>#<section>"), PDF by page ("<path>#p.<n>"), EPUB by
 /// chapter ("<path>#ch.<n>"), other files whole ("<path>").
 pub fn parts_of(rel: &str, text: &str, w: &Words, label: &str) -> std::collections::BTreeMap<String, String> {
@@ -128,6 +153,9 @@ pub fn parts_of(rel: &str, text: &str, w: &Words, label: &str) -> std::collectio
             out.insert(format!("{rel}#{name}"), part);
         }
     } else if low.ends_with(".md") {
+        if left_out(text) {
+            return out;
+        }
         for (name, part) in split_markdown(text, w, label, rel) {
             out.insert(format!("{rel}#{name}"), part);
         }
@@ -204,6 +232,34 @@ mod tests {
             intro: "(冒頭)".into(),
             source: "（出典: {where}）".into(),
         }
+    }
+
+    #[test]
+    fn front_matter_leaves_a_note_out() {
+        for md in [
+            "---\nrag: false\n---\n# T\n",
+            "---\ntitle: x\nrag: False # draft\ntags: [a]\n---\n",
+            "\u{feff}---\r\nrag: false\r\n---\r\n",
+        ] {
+            assert!(left_out(md), "{md:?}");
+        }
+        for md in [
+            "# T\n\nrag: false\n",
+            "---\nrag: true\n---\n",
+            "---\ntitle: x\n---\nrag: false\n",
+            "---\nrag: false\nnever closed\n",
+            "---\n  rag: false\n---\n",
+            "\n---\nrag: false\n---\n",
+        ] {
+            assert!(!left_out(md), "{md:?}");
+        }
+        let w = Words::default();
+        assert!(parts_of("a.md", "---\nrag: false\n---\n## A\n\nbody\n", &w, "x").is_empty());
+        assert_eq!(
+            parts_of("a.md", "---\nrag: true\n---\n\n## A\n\nbody\n", &w, "x").len(),
+            2
+        );
+        assert_eq!(parts_of("a.txt", "---\nrag: false\n---\n", &w, "x").len(), 1);
     }
 
     #[test]
