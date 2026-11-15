@@ -165,8 +165,40 @@ pub fn parts_of(rel: &str, text: &str, w: &Words, label: &str) -> std::collectio
     out
 }
 
+/// The level (3..=6) and name of a "### " .. "###### " heading line.
+fn deep_heading(line: &str) -> Option<(usize, &str)> {
+    let level = line.bytes().take_while(|&b| b == b'#').count();
+    ((3..=6).contains(&level) && line[level..].starts_with(' '))
+        .then(|| (level, pystr::strip(&line[level + 1..])))
+        .filter(|(_, name)| !name.is_empty())
+}
+
+/// Whether a part has "### " .. "###### " headings outside code fences. Its chunks then carry those headings
+/// (chunks), so its state sha is made differently (part_sha) and it is sent once again after the change.
+pub fn has_deep_headings(text: &str) -> bool {
+    let mut fence = false;
+    pystr::splitlines(text).into_iter().any(|l| {
+        if pystr::lstrip(l).starts_with("```") {
+            fence = !fence;
+        }
+        !fence && deep_heading(l).is_some()
+    })
+}
+
+/// The sha256 kept in the state for a part: of its text, and for a part with deep headings of its text with a mark,
+/// so such parts sent before the chunks carried those headings are sent again (and nothing else is).
+pub fn part_sha(text: &str) -> String {
+    if has_deep_headings(text) {
+        crate::read::sha256_hex(&format!("{text}\0deep-headings"))
+    } else {
+        crate::read::sha256_hex(text)
+    }
+}
+
 /// A part cut into chunks of at most CHUNK characters at paragraph breaks; each but the first starts with
-/// "title › section".
+/// "title › section", followed by the "### " .. "###### " headings open where the chunk starts
+/// ("title › section › 1.3 › 1.3.2"), so a chunk far below its heading still says what it is about. A paragraph
+/// that is only headings is not left at the end of a chunk: it goes to the next one.
 pub fn chunks(text: &str) -> Vec<String> {
     let lines = pystr::splitlines(text);
     let title = match lines.first() {
@@ -183,20 +215,70 @@ pub fn chunks(text: &str) -> Vec<String> {
         .filter(|x| !x.is_empty())
         .collect::<Vec<_>>()
         .join(" › ");
-    let mut out: Vec<String> = Vec::new();
+    // (chunk, the deep headings open where it starts)
+    let mut out: Vec<(String, Vec<String>)> = Vec::new();
     let mut buf = String::new();
     let mut buf_len = 0usize; // characters in buf
+    let mut buf_path: Vec<String> = Vec::new(); // the deep headings open where buf starts
+    // a paragraph of headings only at the end of buf: (its byte start in buf, the path where it starts)
+    let mut tail: Option<(usize, Vec<String>)> = None;
+    let mut open: Vec<(usize, String)> = Vec::new(); // the deep headings open so far
+    let mut fence = false;
+    let path = |open: &[(usize, String)]| open.iter().map(|(_, n)| n.clone()).collect::<Vec<_>>();
     for para in text.split("\n\n") {
         let para_len = pystr::len(para);
-        if !buf.is_empty() && buf_len + para_len > CHUNK {
-            out.push(std::mem::take(&mut buf));
+        // the path where this paragraph starts; a paragraph starting with a heading closes those of its level
+        let first = pystr::splitlines(para)
+            .into_iter()
+            .find(|l| !pystr::strip(l).is_empty());
+        let before = match first.filter(|_| !fence).and_then(deep_heading) {
+            Some((level, _)) => path(&open.iter().filter(|(l, _)| *l < level).cloned().collect::<Vec<_>>()),
+            None => path(&open),
+        };
+        let (mut headings_only, mut any) = (true, false);
+        for line in pystr::splitlines(para) {
+            if pystr::lstrip(line).starts_with("```") {
+                fence = !fence;
+                headings_only = false;
+                continue;
+            }
+            match (!fence).then(|| deep_heading(line)).flatten() {
+                Some((level, name)) => {
+                    open.retain(|(l, _)| *l < level);
+                    open.push((level, name.to_string()));
+                    any = true;
+                }
+                None => headings_only &= pystr::strip(line).is_empty(),
+            }
+        }
+        let headings_only = headings_only && any;
+        // a buf of headings only is not cut off from what follows
+        if !buf.is_empty() && buf_len + para_len > CHUNK && !matches!(tail, Some((0, _))) {
+            // keep a heading with what it heads: a paragraph of headings ending buf starts the next chunk
+            let moved = match tail.take() {
+                Some((at, p)) => {
+                    let rest = buf.split_off(at);
+                    buf.truncate(buf.trim_end_matches('\n').len());
+                    Some((rest, p))
+                }
+                None => None,
+            };
+            out.push((std::mem::take(&mut buf), std::mem::take(&mut buf_path)));
             buf_len = 0;
+            if let Some((rest, p)) = moved {
+                buf_len = pystr::len(&rest);
+                buf = rest;
+                buf_path = p;
+            }
         }
         if buf.is_empty() {
+            buf_path = before.clone();
+            tail = headings_only.then_some((0, before));
             buf.push_str(para);
             buf_len = para_len;
         } else {
             buf.push_str("\n\n");
+            tail = headings_only.then_some((buf.len(), before));
             buf.push_str(para);
             buf_len += 2 + para_len;
         }
@@ -204,16 +286,22 @@ pub fn chunks(text: &str) -> Vec<String> {
             // one very long paragraph (a big table)
             let cut = buf.char_indices().nth(CHUNK).map(|(b, _)| b).unwrap_or(buf.len());
             let rest = buf.split_off(cut);
-            out.push(std::mem::replace(&mut buf, rest));
+            out.push((std::mem::replace(&mut buf, rest), buf_path.clone()));
             buf_len -= CHUNK;
+            tail = None;
         }
     }
     if !pystr::strip(&buf).is_empty() {
-        out.push(buf);
+        out.push((buf, buf_path));
     }
     out.into_iter()
         .enumerate()
-        .map(|(i, c)| {
+        .map(|(i, (c, deep))| {
+            let head = std::iter::once(head.as_str())
+                .chain(deep.iter().map(String::as_str))
+                .filter(|x| !x.is_empty())
+                .collect::<Vec<_>>()
+                .join(" › ");
             if i == 0 || head.is_empty() {
                 c
             } else {
@@ -288,5 +376,33 @@ mod tests {
         assert_eq!(c.len(), 4);
         assert!(c[1].starts_with("T › S\n"));
         assert_eq!(pystr::len(&c[2]), CHUNK + "T › S\n".chars().count());
+        // no deep headings: the same chunks and sha as before deep headings were carried
+        assert!(!has_deep_headings(&long));
+        assert_eq!(part_sha(&long), crate::read::sha256_hex(&long));
+    }
+
+    #[test]
+    fn chunks_carry_deep_headings() {
+        let a = "あ".repeat(1400);
+        let md = format!(
+            "# T\n\n## S\n\n### 1 A\n\n{a}\n\n#### 1.1 B\n\n{a}\n\n{a}\n\n### 2 C\n\n{a}\n\n```\n### not\n```\n\n{a}\n"
+        );
+        assert!(has_deep_headings(&md));
+        assert_ne!(part_sha(&md), crate::read::sha256_hex(&md));
+        let c = chunks(&md);
+        let heads: Vec<&str> = c.iter().map(|c| c.lines().next().unwrap()).collect();
+        assert_eq!(
+            heads,
+            ["# T", "T › S › 1 A", "T › S › 1 A › 1.1 B", "T › S", "T › S › 2 C"]
+        );
+        // a heading goes with its text to the next chunk, not left at the end of the one before
+        assert!(!c[0].contains("1.1 B"));
+        assert!(c[1].starts_with("T › S › 1 A\n#### 1.1 B\n\n"));
+        assert!(!c[2].contains("2 C"));
+        // "### 2 C" closes "1 A" and "1.1 B"; the fenced "### not" is no heading
+        assert!(c[3].starts_with("T › S\n### 2 C\n\n"));
+        assert!(c[3].contains("```\n### not\n```"));
+        assert!(!has_deep_headings("# T\n\n```\n### x\n```\n"));
+        assert!(!has_deep_headings("####### seven\n\n###no space\n"));
     }
 }

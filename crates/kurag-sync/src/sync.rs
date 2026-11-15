@@ -27,7 +27,7 @@ use toml::{Table, Value as Toml};
 use crate::extract::log;
 use crate::pystr::fnmatch;
 use crate::read::{read_text, sha256_hex};
-use crate::split::{Words, chunks, parts_of, place};
+use crate::split::{Words, chunks, part_sha, parts_of, place};
 
 /// chunks per request
 const BATCH: usize = 200;
@@ -946,7 +946,7 @@ pub fn run(
             for (part, ptext) in parts_of(rel, &text, words, &label) {
                 let key = format!("{prefix}{part}");
                 seen.insert(key.clone());
-                let sha = sha256_hex(&ptext);
+                let sha = part_sha(&ptext);
                 let old = state.get(&key);
                 if old.is_some_and(|o| o["sha"] == json!(sha) && o["namespace"] == json!(ns)) {
                     continue;
