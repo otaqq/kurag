@@ -136,7 +136,7 @@ Files are read as Markdown (`.md`, split at `## ` outside code fences), PDF (`.p
 `pdftotext`), EPUB (`.epub`, one part per chapter of the spine) or plain text (anything else, one part). PDF pages and
 EPUB chapters with fewer than 50 letters are left out (scans without a text layer). Parts are cut into chunks of at
 most 1,500 characters at paragraph breaks, each after the first starting with "title › section", followed by the
-`### ` .. `###### ` headings open where the chunk starts ("title › section › 1.3 Society › 1.3.2 Population"), so a
+`### ` .. `###### ` headings open where the chunk starts ("title › section › 2 Setup › 2.1 Install"), so a
 chunk far below its heading still says what it is about. A paragraph that is only headings is not left at the end of
 a chunk; it starts the next one. How chunks are made is part of each file's stamp in `state/files.json`, and parts
 with such headings keep a different sha256 in the state, so after an upgrade from a version without this the next
