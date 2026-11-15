@@ -8,6 +8,9 @@ pub const CHUNK: usize = 1500; // characters; Japanese is about 1-1.5 characters
 /// A PDF page or EPUB chapter with fewer letters (spaces not counted) is left out: scanned pages without a text
 /// layer give only page numbers or nothing, which would fill the index with empty chunks.
 pub const MIN_PAGE_CHARS: usize = 50;
+/// How parts are cut into chunks; changing it makes the next run read every file again (sync.rs text_settings).
+/// "deep-headings": chunk heads carry the open "### " .. "###### " headings (chunks).
+pub const CHUNKS_FORMAT: &str = "deep-headings";
 
 /// Words put into the parts (`[text]` in the sources file). Changing them changes every part.
 #[derive(Clone)]
@@ -189,7 +192,7 @@ pub fn has_deep_headings(text: &str) -> bool {
 /// so such parts sent before the chunks carried those headings are sent again (and nothing else is).
 pub fn part_sha(text: &str) -> String {
     if has_deep_headings(text) {
-        crate::read::sha256_hex(&format!("{text}\0deep-headings"))
+        crate::read::sha256_hex(&format!("{text}\0{CHUNKS_FORMAT}"))
     } else {
         crate::read::sha256_hex(text)
     }

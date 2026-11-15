@@ -27,7 +27,7 @@ use toml::{Table, Value as Toml};
 use crate::extract::log;
 use crate::pystr::fnmatch;
 use crate::read::{read_text, sha256_hex};
-use crate::split::{Words, chunks, part_sha, parts_of, place};
+use crate::split::{CHUNKS_FORMAT, Words, chunks, part_sha, parts_of, place};
 
 /// chunks per request
 const BATCH: usize = 200;
@@ -701,10 +701,10 @@ fn fetch_git(src: &Table, env: &HashMap<String, String>, paths: &Paths) -> Resul
     Ok(dest)
 }
 
-/// A hash of the settings that go into a part's text. It is part of a file's stamp, so a file whose text would change
-/// although the file did not is read again.
+/// A hash of the settings that go into a part's text, and of how parts are cut into chunks (CHUNKS_FORMAT). It is
+/// part of a file's stamp, so a file whose text or chunks would change although the file did not is read again.
 fn text_settings(label: &str, words: &Words) -> String {
-    sha256_hex(&format!("{label}\0{}\0{}", words.intro, words.source))
+    sha256_hex(&format!("{label}\0{}\0{}\0{CHUNKS_FORMAT}", words.intro, words.source))
 }
 
 fn label_of(src: &Table) -> String {
