@@ -725,7 +725,7 @@ dependencies = [
 
 [[package]]
 name = "kurag"
-version = "0.4.4"
+version = "0.4.5"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -753,7 +753,7 @@ dependencies = [
 
 [[package]]
 name = "kurag-core"
-version = "0.4.4"
+version = "0.4.5"
 dependencies = [
  "regex",
  "serde",
@@ -761,7 +761,7 @@ dependencies = [
 
 [[package]]
 name = "kurag-sync"
-version = "0.4.4"
+version = "0.4.5"
 dependencies = [
  "chrono",
  "reqwest",
